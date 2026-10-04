@@ -5,16 +5,16 @@
 
 import { useFrame, useLoader } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import { abs, fract, max, positionView, pow, smoothstep, texture, uniform, uv, vec3 } from "three/tsl";
 import { CARD_H } from "./Card";
 import { DOORS_Z } from "./storyboard";
+import type { DoorsU } from "./tsl";
 
 export const DOOR_W = 2.4;
 export const DOOR_H = DOOR_W * CARD_H;
 const R = 0.063 * DOOR_W;
 const LINE = 0.012;
-
-type U = { uAlpha: { value: number }; uCardZ: { value: number }; uTime: { value: number } };
 
 /** A rounded rect from x0..x1, rounding only the corners on the sides listed. */
 function halfShape(x0: number, x1: number, roundLeft: boolean, roundRight: boolean, h: number, r: number) {
@@ -54,70 +54,55 @@ function outlineGeometry() {
   return new THREE.ShapeGeometry(outer, 24);
 }
 
-const vert = /* glsl */ `
-varying vec2 vUv;
-varying float vDepth;
-void main() {
-  vUv = uv;
-  vec4 mv = modelViewMatrix * vec4(position, 1.0);
-  vDepth = -mv.z;
-  gl_Position = projectionMatrix * mv;
-}`;
+// Fades with view depth: out in the distance, and just before the camera passes through.
+const depthFade = () => {
+  const depth = positionView.z.negate();
+  return smoothstep(9, 18, depth).oneMinus().mul(smoothstep(0.8, 3.6, depth));
+};
 
-const panelFrag = /* glsl */ `
-uniform sampler2D uMask;
-uniform float uAlpha, uTime, uOpen;
-varying vec2 vUv;
-varying float vDepth;
-void main() {
-  float m = texture2D(uMask, vUv).r;
-  vec3 blue = vec3(0.45, 0.78, 1.0);
-  float pulse = pow(fract(abs(vUv.y - 0.575) * 1.6 - uTime * 0.28 + vUv.x * 0.15), 14.0);
-  vec3 col = vec3(0.02, 0.05, 0.13) + blue * m * (1.3 + pulse * 3.5);
-  float a = 0.22 + m * 0.6;
-  float inner = 1.0 - smoothstep(0.0, 0.02, abs(vUv.x - 0.5));
-  col += blue * inner * (0.4 + 3.0 * uOpen);
-  a = max(a, inner * (0.4 + 0.6 * uOpen));
-  float fade = (1.0 - smoothstep(9.0, 18.0, vDepth)) * smoothstep(0.8, 3.6, vDepth);
-  gl_FragColor = vec4(col, a * uAlpha * fade);
-}`;
+function panelMaterial(mask: THREE.Texture, u: DoorsU, uOpen: THREE.UniformNode<"float", number>) {
+  const vUv = uv();
+  const m = texture(mask, vUv).r;
+  const blue = vec3(0.45, 0.78, 1.0);
+  const pulse = pow(fract(abs(vUv.y.sub(0.575)).mul(1.6).sub(u.uTime.mul(0.28)).add(vUv.x.mul(0.15))), 14);
+  const inner = smoothstep(0, 0.02, abs(vUv.x.sub(0.5))).oneMinus();
+  const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false });
+  mat.colorNode = vec3(0.02, 0.05, 0.13)
+    .add(blue.mul(m).mul(pulse.mul(3.5).add(1.3)))
+    .add(blue.mul(inner).mul(uOpen.mul(3).add(0.4)));
+  mat.opacityNode = max(m.mul(0.6).add(0.22), inner.mul(uOpen.mul(0.6).add(0.4)))
+    .mul(u.uAlpha)
+    .mul(depthFade());
+  return mat;
+}
 
-const outlineFrag = /* glsl */ `
-uniform float uAlpha;
-varying float vDepth;
-void main() {
-  float fade = (1.0 - smoothstep(9.0, 18.0, vDepth)) * smoothstep(0.8, 3.6, vDepth);
-  gl_FragColor = vec4(vec3(0.5, 0.8, 1.0) * 1.2, uAlpha * fade);
-}`;
+function outlineMaterial(u: DoorsU) {
+  const mat = new THREE.MeshBasicNodeMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  mat.colorNode = vec3(0.5, 0.8, 1.0).mul(1.2);
+  mat.opacityNode = u.uAlpha.mul(depthFade());
+  return mat;
+}
 
-export function Doors({ u }: { u: U }) {
+export function Doors({ u }: { u: DoorsU }) {
   const mask = useLoader(THREE.TextureLoader, "/images/circuit-mask.png");
   const hinges = useRef<(THREE.Group | null)[]>([]);
 
-  const { left, right, outline, panels, outlineMat } = useMemo(() => {
-    const panels = DOORS_Z.map(
-      () =>
-        new THREE.ShaderMaterial({
-          vertexShader: vert,
-          fragmentShader: panelFrag,
-          uniforms: { uMask: { value: mask }, uAlpha: u.uAlpha, uTime: u.uTime, uOpen: { value: 0 } },
-          transparent: true,
-          depthWrite: false,
-          side: THREE.DoubleSide,
-          fog: false,
-        }),
-    );
-    const outlineMat = new THREE.ShaderMaterial({
-      vertexShader: vert,
-      fragmentShader: outlineFrag,
-      uniforms: { uAlpha: u.uAlpha },
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      side: THREE.DoubleSide,
-      fog: false,
-    });
-    return { left: halfGeometry(-1), right: halfGeometry(1), outline: outlineGeometry(), panels, outlineMat };
+  const { left, right, outline, opens, panels, outlineMat } = useMemo(() => {
+    const opens = DOORS_Z.map(() => uniform(0));
+    return {
+      left: halfGeometry(-1),
+      right: halfGeometry(1),
+      outline: outlineGeometry(),
+      opens,
+      panels: opens.map((o) => panelMaterial(mask, u, o)),
+      outlineMat: outlineMaterial(u),
+    };
   }, [mask, u]);
 
   useEffect(
@@ -133,7 +118,7 @@ export function Doors({ u }: { u: U }) {
       // 0 while the card is 1.2 in front of the door, 1 once it is 0.6 past it.
       const k01 = THREE.MathUtils.clamp((z + 1.2 - u.uCardZ.value) / 1.8, 0, 1);
       const open = k01 * k01 * (3 - 2 * k01);
-      panels[k].uniforms.uOpen.value = open;
+      opens[k].value = open;
       const l = hinges.current[k * 2];
       const r = hinges.current[k * 2 + 1];
       if (l && r) {

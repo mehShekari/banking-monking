@@ -2,14 +2,35 @@
 
 // The achievement recap: the seven stage nodes lift off the card into a constellation,
 // joined stage to stage by dotted links of light flowing upward. Child of the card group,
-// like PathTrace. Everything moves in the vertex shaders; the CPU only toggles visibility.
+// like PathTrace. Everything moves in the materials; the CPU only toggles visibility.
 
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import {
+  attribute,
+  exp,
+  fract,
+  fwidth,
+  instancedBufferAttribute,
+  length,
+  max,
+  min,
+  mix,
+  sin,
+  smoothstep,
+  uv,
+  varying,
+  vec2,
+  vec3,
+} from "three/tsl";
 import { FACE_Z } from "./Card";
 import { STAGES } from "./path";
-import { GLOW, type PathU } from "./PathTrace";
+import { GLOW } from "./PathTrace";
+import type { PathU } from "./tsl";
+
+type F = THREE.Node<"float">;
+type V3 = THREE.Node<"vec3">;
 
 const NODE_HALF = 0.05;
 const DOT_HALF = 0.012;
@@ -20,30 +41,35 @@ const onCard = (k: number) => [STAGES[k].pos[0], STAGES[k].pos[1], FACE_Z + 0.00
 const lifted = (k: number) => [STAGES[k].pos[0] * 1.6, STAGES[k].pos[1] * 1.6, FACE_Z + 0.08 + 0.05 * k];
 
 type Item = Record<string, number[]>;
+type Get = { f: (name: string) => F; v: (name: string) => V3 };
 
-// One vertex per item, or with `half` one camera-facing quad per item (corner offset in aC).
-function geometry(items: Item[], half?: number) {
-  const per = half ? 4 : 1;
-  const g = new THREE.BufferGeometry();
-  for (const name of Object.keys(items[0])) {
+/** Packs items into one array per field. */
+function columns(items: Item[]) {
+  return Object.keys(items[0]).map((name) => {
     const size = items[0][name].length;
-    const arr = new Float32Array(items.length * per * size);
-    items.forEach((it, i) => {
-      for (let c = 0; c < per; c++) arr.set(it[name], (i * per + c) * size);
-    });
-    g.setAttribute(name, new THREE.BufferAttribute(arr, size));
-  }
-  if (half) {
-    const corner: number[] = [];
-    const idx: number[] = [];
-    items.forEach((_, i) => {
-      corner.push(-half, -half, half, -half, half, half, -half, half);
-      idx.push(i * 4, i * 4 + 1, i * 4 + 2, i * 4, i * 4 + 2, i * 4 + 3);
-    });
-    g.setAttribute("aC", new THREE.Float32BufferAttribute(corner, 2));
-    g.setIndex(idx);
-  }
+    const arr = new Float32Array(items.length * size);
+    items.forEach((it, i) => arr.set(it[name], i * size));
+    return { name, size, arr };
+  });
+}
+
+/** One vertex per item (for the lines). */
+function vertexGeometry(items: Item[]) {
+  const g = new THREE.BufferGeometry();
+  for (const c of columns(items)) g.setAttribute(c.name, new THREE.BufferAttribute(c.arr, c.size));
   return g;
+}
+const vertexGet: Get = { f: (n) => attribute<"float">(n, "float"), v: (n) => attribute<"vec3">(n, "vec3") };
+
+/** One sprite instance per item. */
+function instanceGet(items: Item[]): Get {
+  const cols = new Map(
+    columns(items).map((c) => {
+      const a = new THREE.InstancedBufferAttribute(c.arr, c.size);
+      return [c.name, c.size === 1 ? instancedBufferAttribute<"float">(a, "float") : instancedBufferAttribute<"vec3">(a, "vec3")];
+    }),
+  );
+  return { f: (n) => cols.get(n) as F, v: (n) => cols.get(n) as V3 };
 }
 
 // Link k→k+1 at arc parameter t: both ends on-card and lifted.
@@ -58,113 +84,85 @@ const linkItem = (k: number, t: number): Item => ({
 
 const links = STAGES.slice(1).map((_, k) => k);
 
-const common = /* glsl */ `
-uniform float uLift, uTime;
-attribute vec3 aA1;
-attribute float aK;
-varying float vA;
-// Bottom stage lifts first.
-float lk(float k) { return smoothstep(k * 0.06, k * 0.06 + 0.6, uLift); }
-// A node's place: from the card face to its lifted spot, bobbing gently once up.
-vec3 node(vec3 p0, vec3 p1, float k) {
-  float l = lk(k);
-  return mix(p0, p1, l) + l * vec3(0.004 * sin(uTime * 0.8 + k * 2.3), 0.01 * sin(uTime * 1.1 + k * 1.7), 0.0);
-}`;
+function shared(u: PathU, get: Get) {
+  // Bottom stage lifts first.
+  const lk = (k: F) => smoothstep(k.mul(0.06), k.mul(0.06).add(0.6), u.uLift);
+  // A node's place: from the card face to its lifted spot, bobbing gently once up.
+  const node = (p0: V3, p1: V3, k: F) => {
+    const l = lk(k);
+    const bob = vec3(sin(u.uTime.mul(0.8).add(k.mul(2.3))).mul(0.004), sin(u.uTime.mul(1.1).add(k.mul(1.7))).mul(0.01), 0);
+    return mix(p0, p1, l).add(bob.mul(l));
+  };
+  const aK = get.f("aK");
+  // Point t along link k→k+1, on a slight arch toward the viewer.
+  const link = (t: F, la: F) => {
+    const p = mix(node(get.v("position"), get.v("aA1"), aK), node(get.v("aB0"), get.v("aB1"), aK.add(1)), t);
+    return p.add(vec3(0, 0, t.mul(t.oneMinus()).mul(la).mul(0.2)));
+  };
+  const la = min(lk(aK), lk(aK.add(1)));
+  return { node, link, la, aK };
+}
 
-const linkChunk = /* glsl */ `
-attribute vec3 aB0;
-attribute vec3 aB1;
-attribute float aT;
-// Point t along link k→k+1, on a slight arch toward the viewer.
-vec3 link(float t, float la) {
-  vec3 p = mix(node(position, aA1, aK), node(aB0, aB1, aK + 1.0), t);
-  p.z += 0.2 * t * (1.0 - t) * la;
-  return p;
-}`;
-
-const billboard = /* glsl */ `
-attribute vec2 aC;
-varying vec2 vC;
-vec4 billboard(vec3 p) {
-  vC = aC;
-  vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  mv.xy += aC;
-  return projectionMatrix * mv;
-}`;
-
-const nodeVert = /* glsl */ `
-${common}
-${billboard}
-void main() {
-  // Hand-off: the on-card node fades by (1 - uLift) as this one takes its light.
-  vA = uLift;
-  gl_Position = billboard(node(position, aA1, aK));
-}`;
-const nodeFrag = /* glsl */ `
-varying vec2 vC;
-varying float vA;
-void main() {
-  float r = length(vC);
-  float aa = max(fwidth(r), 0.0005);
-  float core = 1.0 - smoothstep(0.008, 0.008 + aa, r);
-  float ring = smoothstep(0.027 - aa, 0.027, r) * (1.0 - smoothstep(0.03, 0.03 + aa, r));
-  float halo = exp(-r * r * 2500.0);
-  gl_FragColor = vec4(vec3(0.45, 0.78, 1.0) * (core * 6.0 + ring * 2.5 + halo * 1.5), vA);
-}`;
-
-const dotVert = /* glsl */ `
-${common}
-${linkChunk}
-${billboard}
-void main() {
-  float t = fract(aT + uTime * 0.35);
-  float la = min(lk(aK), lk(aK + 1.0));
-  vA = la * smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.9, 1.0, t));
-  gl_Position = billboard(link(t, la));
-}`;
-const dotFrag = /* glsl */ `
-varying vec2 vC;
-varying float vA;
-void main() {
-  float r = length(vC) * ${(1 / DOT_HALF).toFixed(3)};
-  gl_FragColor = vec4(vec3(0.45, 0.78, 1.0) * 3.0, exp(-r * r * 9.0) * vA);
-}`;
-
-const lineVert = /* glsl */ `
-${common}
-${linkChunk}
-void main() {
-  float la = min(lk(aK), lk(aK + 1.0));
-  vA = la * 0.12;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(link(aT, la), 1.0);
-}`;
-const lineFrag = /* glsl */ `
-varying float vA;
-void main() { gl_FragColor = vec4(0.45, 0.78, 1.0, vA); }`;
+/** Distance from the sprite centre in the old billboard units (±half). */
+const corner = (half: number) => length(uv().sub(0.5)).mul(2 * half);
 
 export function Constellation({ u }: { u: PathU }) {
   const group = useRef<THREE.Group>(null);
   const parts = useMemo(() => {
-    const mat = (vertexShader: string, fragmentShader: string) =>
-      new THREE.ShaderMaterial({ vertexShader, fragmentShader, uniforms: u, ...GLOW });
+    const BLUE = vec3(0.45, 0.78, 1.0);
+
+    // Nodes: core + ring + halo; the on-card node fades by (1 - uLift) as this one takes its light.
+    const ng = instanceGet(STAGES.map((_, k) => ({ position: onCard(k), aA1: lifted(k), aK: [k] })));
+    const n = shared(u, ng);
+    const r = corner(NODE_HALF);
+    const aa = max(fwidth(r), 0.0005);
+    const core = smoothstep(0.008, aa.add(0.008), r).oneMinus();
+    const ring = smoothstep(aa.negate().add(0.027), 0.027, r).mul(smoothstep(0.03, aa.add(0.03), r).oneMinus());
+    const halo = exp(r.mul(r).mul(-2500));
+    const nodeMat = new THREE.SpriteNodeMaterial(GLOW);
+    nodeMat.positionNode = n.node(ng.v("position"), ng.v("aA1"), n.aK);
+    nodeMat.scaleNode = vec2(2 * NODE_HALF);
+    nodeMat.colorNode = BLUE.mul(core.mul(6).add(ring.mul(2.5)).add(halo.mul(1.5)));
+    nodeMat.opacityNode = u.uLift;
+
+    // Dots: evenly spaced seeds, a dotted line that flows.
+    const dg = instanceGet(links.flatMap((k) => Array.from({ length: DOTS }, (_, i) => linkItem(k, i / DOTS))));
+    const d = shared(u, dg);
+    const t = fract(dg.f("aT").add(u.uTime.mul(0.35)));
+    const dotA = varying(d.la.mul(smoothstep(0, 0.1, t)).mul(smoothstep(0.9, 1, t).oneMinus()));
+    const dr = corner(DOT_HALF).div(DOT_HALF);
+    const dotMat = new THREE.SpriteNodeMaterial(GLOW);
+    dotMat.positionNode = d.link(t, d.la);
+    dotMat.scaleNode = vec2(2 * DOT_HALF);
+    dotMat.colorNode = BLUE.mul(3);
+    dotMat.opacityNode = exp(dr.mul(dr).mul(-9)).mul(dotA);
+
+    // Faint lines along the same arches.
+    const l = shared(u, vertexGet);
+    const lineMat = new THREE.LineBasicNodeMaterial(GLOW);
+    lineMat.positionNode = l.link(vertexGet.f("aT"), l.la);
+    lineMat.colorNode = BLUE;
+    lineMat.opacityNode = varying(l.la.mul(0.12));
+
     return {
-      nodes: geometry(STAGES.map((_, k) => ({ position: onCard(k), aA1: lifted(k), aK: [k] })), NODE_HALF),
-      // Evenly spaced seeds: a dotted line that flows.
-      dots: geometry(links.flatMap((k) => Array.from({ length: DOTS }, (_, i) => linkItem(k, i / DOTS))), DOT_HALF),
-      lines: geometry(
+      nodeQuad: new THREE.PlaneGeometry(1, 1),
+      dotQuad: new THREE.PlaneGeometry(1, 1),
+      lines: vertexGeometry(
         links.flatMap((k) =>
           Array.from({ length: LINE_SEG }, (_, i) => [linkItem(k, i / LINE_SEG), linkItem(k, (i + 1) / LINE_SEG)]).flat(),
         ),
       ),
-      nodeMat: mat(nodeVert, nodeFrag),
-      dotMat: mat(dotVert, dotFrag),
-      lineMat: mat(lineVert, lineFrag),
+      nodeCount: STAGES.length,
+      dotCount: links.length * DOTS,
+      nodeMat,
+      dotMat,
+      lineMat,
     };
   }, [u]);
 
   useEffect(
     () => () => {
-      for (const d of Object.values(parts)) d.dispose();
+      for (const d of [parts.nodeQuad, parts.dotQuad, parts.lines, parts.nodeMat, parts.dotMat, parts.lineMat]) d.dispose();
     },
     [parts],
   );
@@ -176,8 +174,20 @@ export function Constellation({ u }: { u: PathU }) {
   return (
     <group ref={group} visible={false}>
       <lineSegments geometry={parts.lines} material={parts.lineMat} frustumCulled={false} renderOrder={5} />
-      <mesh geometry={parts.dots} material={parts.dotMat} frustumCulled={false} renderOrder={6} />
-      <mesh geometry={parts.nodes} material={parts.nodeMat} frustumCulled={false} renderOrder={7} />
+      <sprite
+        args={[parts.dotMat]}
+        geometry={parts.dotQuad}
+        count={parts.dotCount}
+        frustumCulled={false}
+        renderOrder={6}
+      />
+      <sprite
+        args={[parts.nodeMat]}
+        geometry={parts.nodeQuad}
+        count={parts.nodeCount}
+        frustumCulled={false}
+        renderOrder={7}
+      />
     </group>
   );
 }

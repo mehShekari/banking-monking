@@ -2,18 +2,50 @@
 
 // The card, built from the artwork until the real glTF arrives. To swap it in:
 // load the model here, keep the group/face/edge refs on `rig`, and the
-// timeline, circuit shader and network keep working unchanged.
+// timeline, circuit nodes and network keep working unchanged.
 
-import { useLoader, useThree } from "@react-three/fiber";
+import { useFrame, useLoader, useThree } from "@react-three/fiber";
 import { useEffect, useMemo, type ReactNode } from "react";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import {
+  abs,
+  attribute,
+  clamp,
+  cos,
+  dot,
+  exp,
+  floor,
+  fract,
+  instancedBufferAttribute,
+  length,
+  max,
+  mix,
+  modelViewMatrix,
+  positionGeometry,
+  pow,
+  rand,
+  screenDPR,
+  select,
+  sin,
+  smoothstep,
+  step,
+  texture,
+  uv,
+  varying,
+  vec2,
+  vec3,
+  vec4,
+  diffuseColor,
+} from "three/tsl";
+import type { Node } from "three/webgpu";
+import { makeCardU, makeNetworkU, type CardU, type NetworkU } from "./tsl";
 
 export const CARD_W = 1;
 export const CARD_H = 2868 / 1764;
 const T = 0.016;
 const BEVEL = 0.0035;
 // Measured off the artwork: corner radius ≈110 px of a 1755 px wide card.
-const RADIUS = 0.063;
+export const RADIUS = 0.063;
 export const FACE_Z = T / 2 + BEVEL + 0.0004;
 // One list so every useLoader call shares the same cached textures.
 export const CARD_TEXTURES = [
@@ -27,41 +59,18 @@ export const FRONT_BOX = { w: 1764, h: 2868, x0: 5, x1: 1760, y0: 5, y1: 2864 };
 
 export type Rig = {
   card: THREE.Group | null;
-  faces: THREE.MeshPhysicalMaterial[];
-  edge: THREE.MeshStandardMaterial | null;
-  uniforms: {
-    uTime: { value: number };
-    uGlow: { value: number };
-    uSweep: { value: number };
-    uSweepAngle: { value: number };
-    uCharge: { value: number };
-    uForm: { value: number };
-    uIgnite: { value: number };
-    uNameGlow: { value: number };
-  };
-  network: { uMix: { value: number }; uTime: { value: number }; uSize: { value: number } };
+  faces: THREE.MeshPhysicalNodeMaterial[];
+  edge: THREE.MeshPhysicalNodeMaterial | null;
+  uniforms: CardU;
+  network: NetworkU;
 };
 
 export function createRig(): Rig {
-  return {
-    card: null,
-    faces: [],
-    edge: null,
-    uniforms: {
-      uTime: { value: 0 },
-      uGlow: { value: 0 },
-      uSweep: { value: 0 },
-      uSweepAngle: { value: 0.35 },
-      uCharge: { value: 0 },
-      uForm: { value: 0 },
-      uIgnite: { value: 0 },
-      uNameGlow: { value: 0 },
-    },
-    network: { uMix: { value: 0 }, uTime: { value: 0 }, uSize: { value: 28 } },
-  };
+  return { card: null, faces: [], edge: null, uniforms: makeCardU(), network: makeNetworkU() };
 }
 
-function roundedRect(w: number, h: number, r: number) {
+/** The card's outline (counter-clockwise), centred on the origin. */
+export function roundedRect(w: number, h: number, r: number) {
   const s = new THREE.Shape();
   const x = -w / 2;
   const y = -h / 2;
@@ -77,98 +86,66 @@ function roundedRect(w: number, h: number, r: number) {
   return s;
 }
 
+// Value noise on a lattice of `rand` (the GLSL era's formNoise, 1:1).
+const formNoise = (p: Node<"vec2">) => {
+  const i = floor(p);
+  const f0 = fract(p);
+  const f = f0.mul(f0).mul(f0.mul(-2).add(3));
+  return mix(
+    mix(rand(i), rand(i.add(vec2(1, 0))), f.x),
+    mix(rand(i.add(vec2(0, 1))), rand(i.add(1)), f.x),
+    f.y,
+  );
+};
+
 // Brushed-metal face with: a resolve from light (uForm, both faces), a travelling light
 // sweep (both faces), and on the front the living circuit and the calligraphy written
 // by light, both read from masks traced off the artwork.
-function patchFace(mat: THREE.MeshPhysicalMaterial, rig: Rig, mask: THREE.Texture, name: THREE.Texture, front: boolean) {
-  // Both faces share this onBeforeCompile source; keep their programs apart.
-  mat.customProgramCacheKey = () => (front ? "card-face-front" : "card-face-back");
-  mat.onBeforeCompile = (shader) => {
-    Object.assign(shader.uniforms, rig.uniforms, { uMask: { value: mask }, uName: { value: name } });
-    shader.fragmentShader = shader.fragmentShader
-      .replace(
-        "#include <common>",
-        `#include <common>
-uniform sampler2D uMask, uName;
-uniform float uTime, uGlow, uSweep, uSweepAngle, uCharge, uForm, uIgnite, uNameGlow;
-float formNoise(vec2 p) {
-  vec2 i = floor(p), f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(rand(i), rand(i + vec2(1.0, 0.0)), f.x), mix(rand(i + vec2(0.0, 1.0)), rand(i + 1.0), f.x), f.y);
-}`,
-      )
-      .replace(
-        "#include <emissivemap_fragment>",
-        `#include <emissivemap_fragment>
-{
-  vec2 uv = vMapUv;
+function faceNodes(mat: THREE.MeshPhysicalNodeMaterial, U: CardU, mask: THREE.Texture, name: THREE.Texture, front: boolean) {
+  const fuv = uv();
+  const m = texture(mask, fuv).r;
+
   // Built from light: the face resolves through a noise field (traces first), a thin light on the edge.
-  if (uForm < 0.999) {
-    float f = ${front ? "mix(formNoise(uv * vec2(40.0, 65.0)), 1.0 - texture2D(uMask, uv).r, 0.6)" : "formNoise(uv * vec2(40.0, 65.0))"};
-    float thr = uForm * 1.12 - 0.06;
-    if (f > thr) discard;
-    totalEmissiveRadiance += vec3(0.45, 0.78, 1.0) * 2.2 * (1.0 - smoothstep(0.0, 0.02, thr - f));
+  // Coarse cells: the face resolves in clumps along the circuit, not as grain.
+  const noise = formNoise(fuv.mul(vec2(16, 26)));
+  const f = front ? mix(noise, m.oneMinus(), 0.6) : noise;
+  const thr = U.uForm.mul(1.12).sub(0.06);
+  const forming = U.uForm.lessThan(0.999);
+  mat.maskNode = forming.not().or(f.lessThanEqual(thr));
+  const edgeLight = select(forming, vec3(0.45, 0.78, 1.0).mul(smoothstep(0, 0.02, thr.sub(f)).oneMinus().mul(2.2)), vec3(0));
+
+  const dir = vec2(cos(U.uSweepAngle), sin(U.uSweepAngle));
+  const s = dot(fuv.sub(0.5), dir).add(0.5);
+  const c = mix(-0.4, 1.4, fract(U.uSweep));
+  const a = s.sub(c).div(0.026);
+  const b = s.sub(c).add(0.08).div(0.14);
+  const band = exp(a.mul(a).negate()).mul(1.05).add(exp(b.mul(b).negate()).mul(0.3));
+  let emissive: Node<"vec3"> = edgeLight.add(
+    vec3(0.78, 0.88, 1.0).mul(band.mul(diffuseColor.b.add(0.35)).mul(front ? 1.0 : 0.4)),
+  );
+
+  if (front) {
+    const col = floor(fuv.x.mul(110));
+    const h = fract(sin(col.mul(12.9898).add(4.1)).mul(43758.5453));
+    // Holding the card charges it: every trace on, brighter, faster.
+    const on = max(smoothstep(h.mul(0.7), h.mul(0.7).add(0.3), U.uGlow), U.uCharge);
+    const d = abs(fuv.y.sub(0.575));
+    const p = fract(d.mul(2.6).sub(U.uTime.mul(U.uCharge.mul(0.9).add(0.3))).add(h.mul(0.75)));
+    const pulse = pow(p, 16);
+    const g = max(U.uGlow, U.uCharge).mul(U.uCharge.mul(2.5).add(1));
+    emissive = emissive.add(
+      vec3(0.38, 0.72, 1.0).mul(m.mul(on.mul(pulse.mul(5).add(0.35)).mul(g).add(U.uCharge.mul(0.15)))),
+    );
+    // The name is written by light right to left (Persian reading order), then glows by uNameGlow.
+    const nm = texture(name, fuv).r;
+    const xw = mix(1.08, -0.08, U.uIgnite);
+    const written = smoothstep(xw.sub(0.015), xw.add(0.015), fuv.x);
+    const lx = fuv.x.sub(xw).div(0.012);
+    const lead = exp(lx.mul(lx).negate()).mul(step(U.uIgnite, 0.999));
+    emissive = emissive.add(vec3(0.85, 0.93, 1.0).mul(nm.mul(written.mul(U.uNameGlow).mul(0.8).add(lead.mul(3)))));
   }
-  vec2 dir = vec2(cos(uSweepAngle), sin(uSweepAngle));
-  float s = dot(uv - 0.5, dir) + 0.5;
-  float c = mix(-0.4, 1.4, fract(uSweep));
-  float band = exp(-pow((s - c) / 0.026, 2.0)) * 1.05 + exp(-pow((s - c + 0.08) / 0.14, 2.0)) * 0.3;
-  totalEmissiveRadiance += vec3(0.78, 0.88, 1.0) * band * (0.35 + diffuseColor.b) * ${front ? "1.0" : "0.4"};
-  ${
-    front
-      ? `float m = texture2D(uMask, uv).r;
-  float col = floor(uv.x * 110.0);
-  float h = fract(sin(col * 12.9898 + 4.1) * 43758.5453);
-  // Holding the card charges it: every trace on, brighter, faster.
-  float on = max(smoothstep(h * 0.7, h * 0.7 + 0.3, uGlow), uCharge);
-  float d = abs(uv.y - 0.575);
-  float p = fract(d * 2.6 - uTime * (0.3 + 0.9 * uCharge) + h * 0.75);
-  float pulse = pow(p, 16.0);
-  float g = max(uGlow, uCharge) * (1.0 + 2.5 * uCharge);
-  totalEmissiveRadiance += vec3(0.38, 0.72, 1.0) * m * (on * (0.35 + pulse * 5.0) * g + 0.15 * uCharge);
-  // The name is written by light right to left (Persian reading order), then glows by uNameGlow.
-  float nm = texture2D(uName, uv).r;
-  float xw = mix(1.08, -0.08, uIgnite);
-  float written = smoothstep(xw - 0.015, xw + 0.015, uv.x);
-  float lx = (uv.x - xw) / 0.012;
-  float lead = exp(-lx * lx) * step(uIgnite, 0.999);
-  totalEmissiveRadiance += vec3(0.85, 0.93, 1.0) * nm * (written * uNameGlow * 0.8 + lead * 3.0);`
-      : ""
-  }
-}`,
-      );
-  };
+  mat.emissiveNode = emissive;
 }
-
-const netVert = /* glsl */ `
-attribute vec3 aNet;
-attribute float aDelay;
-uniform float uMix, uTime, uSize;
-varying float vA;
-void main() {
-  float m = clamp(uMix * 1.6 - aDelay * 0.6, 0.0, 1.0);
-  m = m * m * (3.0 - 2.0 * m);
-  float a = uTime * 0.12;
-  vec3 net = vec3(aNet.x * cos(a) - aNet.z * sin(a), aNet.y, aNet.x * sin(a) + aNet.z * cos(a));
-  vec3 p = mix(position, net, m);
-  p += m * 0.05 * vec3(sin(uTime * 0.7 + aDelay * 21.0), cos(uTime * 0.5 + aDelay * 13.0), sin(uTime * 0.4 + aDelay * 7.0));
-  vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  gl_Position = projectionMatrix * mv;
-  gl_PointSize = uSize * (0.5 + m) / -mv.z;
-  vA = smoothstep(0.0, 0.1, uMix) * (0.35 + 0.65 * m);
-}`;
-
-const pointFrag = /* glsl */ `
-varying float vA;
-void main() {
-  float r = length(gl_PointCoord - 0.5);
-  float a = smoothstep(0.5, 0.0, r);
-  gl_FragColor = vec4(vec3(0.45, 0.78, 1.0) * 1.17, a * vA * 0.8);
-}`;
-
-const lineFrag = /* glsl */ `
-varying float vA;
-void main() { gl_FragColor = vec4(vec3(0.45, 0.78, 1.0) * 1.4, vA * 0.3); }`;
 
 /** RGBA bytes of an image drawn at w×h. */
 export function readPixels(img: CanvasImageSource, w: number, h: number) {
@@ -180,9 +157,25 @@ export function readPixels(img: CanvasImageSource, w: number, h: number) {
   return ctx.getImageData(0, 0, w, h).data;
 }
 
+// The network's motion: each point leaves its trace for the shell (aNet) as uMix rises.
+function netMotion(N: NetworkU, card: Node<"vec3">, net: Node<"vec3">, delay: Node<"float">) {
+  const m0 = clamp(N.uMix.mul(1.6).sub(delay.mul(0.6)), 0, 1);
+  const m = m0.mul(m0).mul(m0.mul(-2).add(3));
+  const a = N.uTime.mul(0.12);
+  const rot = vec3(net.x.mul(cos(a)).sub(net.z.mul(sin(a))), net.y, net.x.mul(sin(a)).add(net.z.mul(cos(a))));
+  const wobble = vec3(
+    sin(N.uTime.mul(0.7).add(delay.mul(21))),
+    cos(N.uTime.mul(0.5).add(delay.mul(13))),
+    sin(N.uTime.mul(0.4).add(delay.mul(7))),
+  );
+  const p = mix(card, rot, m).add(wobble.mul(m.mul(0.05)));
+  const alpha = smoothstep(0, 0.1, N.uMix).mul(m.mul(0.65).add(0.35));
+  return { p, m, alpha };
+}
+
 // Points sampled on the real traces; on the finale burst they leave the card for a shell around it.
 
-function buildNetwork(mask: THREE.Texture) {
+function buildNetwork(mask: THREE.Texture, N: NetworkU) {
   const img = mask.image as HTMLImageElement;
   const w = 240;
   const h = Math.round((w * img.height) / img.width);
@@ -190,11 +183,11 @@ function buildNetwork(mask: THREE.Texture) {
   const hits: number[] = [];
   for (let i = 0; i < w * h; i++) if (px[i * 4] > 120) hits.push(i);
 
-  const N = Math.min(1400, hits.length);
-  const card = new Float32Array(N * 3);
-  const net = new Float32Array(N * 3);
-  const delay = new Float32Array(N);
-  for (let i = 0; i < N; i++) {
+  const count = Math.min(1400, hits.length);
+  const card = new Float32Array(count * 3);
+  const net = new Float32Array(count * 3);
+  const delay = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
     const k = hits[Math.floor(Math.random() * hits.length)];
     const x = ((k % w) / w - 0.5) * CARD_W;
     const y = (0.5 - Math.floor(k / w) / h) * CARD_H;
@@ -211,9 +204,9 @@ function buildNetwork(mask: THREE.Texture) {
 
   // Two nearest neighbours on the shell, short links only.
   const seg: number[] = [];
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < count; i++) {
     let b1 = -1, b2 = -1, d1 = 0.3, d2 = 0.3;
-    for (let j = 0; j < N; j++) {
+    for (let j = 0; j < count; j++) {
       if (j === i) continue;
       const d = Math.hypot(net[i * 3] - net[j * 3], net[i * 3 + 1] - net[j * 3 + 1], net[i * 3 + 2] - net[j * 3 + 2]);
       if (d < d1) { d2 = d1; b2 = b1; d1 = d; b1 = j; } else if (d < d2) { d2 = d; b2 = j; }
@@ -222,10 +215,24 @@ function buildNetwork(mask: THREE.Texture) {
     if (b2 > i) seg.push(i, b2);
   }
 
-  const points = new THREE.BufferGeometry();
-  points.setAttribute("position", new THREE.BufferAttribute(card, 3));
-  points.setAttribute("aNet", new THREE.BufferAttribute(net, 3));
-  points.setAttribute("aDelay", new THREE.BufferAttribute(delay, 1));
+  // Points: one instanced sprite, sized in pixels like the GLSL era's gl_PointSize.
+  const pv = netMotion(
+    N,
+    instancedBufferAttribute(new THREE.InstancedBufferAttribute(card, 3), "vec3"),
+    instancedBufferAttribute(new THREE.InstancedBufferAttribute(net, 3), "vec3"),
+    instancedBufferAttribute(new THREE.InstancedBufferAttribute(delay, 1), "float"),
+  );
+  const pointMat = new THREE.PointsNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  pointMat.sizeAttenuation = false;
+  pointMat.positionNode = pv.p;
+  // uSize carries the pixel ratio already; the material multiplies by it again.
+  const depth = modelViewMatrix.mul(vec4(pv.p, 1)).z.negate();
+  pointMat.sizeNode = N.uSize.mul(pv.m.add(0.5)).div(depth).div(screenDPR);
+  pointMat.colorNode = vec3(0.45, 0.78, 1.0).mul(1.17);
+  pointMat.opacityNode = smoothstep(0.5, 0, length(uv().sub(0.5))).mul(varying(pv.alpha)).mul(0.8);
+  const points = new THREE.Sprite(pointMat);
+  points.count = count;
+  points.frustumCulled = false;
 
   const lines = new THREE.BufferGeometry();
   const pick = (src: Float32Array, size: number) => {
@@ -236,7 +243,12 @@ function buildNetwork(mask: THREE.Texture) {
   lines.setAttribute("position", new THREE.BufferAttribute(pick(card, 3), 3));
   lines.setAttribute("aNet", new THREE.BufferAttribute(pick(net, 3), 3));
   lines.setAttribute("aDelay", new THREE.BufferAttribute(pick(delay, 1), 1));
-  return { points, lines };
+  const lv = netMotion(N, positionGeometry, attribute("aNet", "vec3"), attribute("aDelay", "float"));
+  const lineMat = new THREE.LineBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  lineMat.positionNode = lv.p;
+  lineMat.colorNode = vec3(0.45, 0.78, 1.0).mul(1.4);
+  lineMat.opacityNode = varying(lv.alpha).mul(0.3);
+  return { points, pointMat, lines, lineMat };
 }
 
 // Face geometry with UVs mapped onto the artwork's opaque box (the PNGs carry a few px of transparent margin),
@@ -244,21 +256,22 @@ function buildNetwork(mask: THREE.Texture) {
 function faceGeometry(shape: THREE.Shape, img: { w: number; h: number; x0: number; x1: number; y0: number; y1: number }) {
   const g = new THREE.ShapeGeometry(shape, 48);
   const pos = g.attributes.position;
-  const uv = g.attributes.uv;
+  const uvs = g.attributes.uv;
   for (let i = 0; i < pos.count; i++) {
     const tx = pos.getX(i) / CARD_W + 0.5;
     const ty = pos.getY(i) / CARD_H + 0.5;
-    uv.setXY(i, (img.x0 + tx * (img.x1 - img.x0)) / img.w, (img.h - img.y1 + ty * (img.y1 - img.y0)) / img.h);
+    uvs.setXY(i, (img.x0 + tx * (img.x1 - img.x0)) / img.w, (img.h - img.y1 + ty * (img.y1 - img.y0)) / img.h);
   }
   return g;
 }
 
 export function Card({ rig, children }: { rig: Rig; children?: ReactNode }) {
-  const gl = useThree((s) => s.gl);
+  const gl = useThree((s) => s.gl) as unknown as THREE.WebGPURenderer;
+  const scene = useThree((s) => s.scene);
   const [front, back, mask, name] = useLoader(THREE.TextureLoader, CARD_TEXTURES);
 
   const parts = useMemo(() => {
-    const maxAniso = gl.capabilities.getMaxAnisotropy();
+    const maxAniso = gl.getMaxAnisotropy();
     for (const t of [front, back]) {
       t.colorSpace = THREE.SRGBColorSpace;
       t.anisotropy = maxAniso;
@@ -285,7 +298,7 @@ export function Card({ rig, children }: { rig: Rig; children?: ReactNode }) {
     const backFace = faceGeometry(shape, { w: 1764, h: 2853, x0: 4, x1: 1762, y0: 4, y1: 2851 });
 
     const faceMat = (map: THREE.Texture, isFront: boolean) => {
-      const m = new THREE.MeshPhysicalMaterial({
+      const m = new THREE.MeshPhysicalNodeMaterial({
         map,
         metalness: isFront ? 0.35 : 0.12,
         roughness: isFront ? 0.36 : 0.6,
@@ -293,48 +306,40 @@ export function Card({ rig, children }: { rig: Rig; children?: ReactNode }) {
         clearcoatRoughness: 0.22,
         anisotropy: isFront ? 0.7 : 0.25,
         anisotropyRotation: Math.PI / 2,
-        emissive: "#000000",
         polygonOffset: true,
         polygonOffsetFactor: -1,
         polygonOffsetUnits: -1,
       });
-      patchFace(m, rig, mask, name, isFront);
+      faceNodes(m, rig.uniforms, mask, name, isFront);
       return m;
     };
     const frontMat = faceMat(front, true);
     const backMat = faceMat(back, false);
     // Caps and edge are the card's own brushed navy metal: they catch light, never read as a black outline.
     const metal = { color: "#1b2747", metalness: 1, roughness: 0.3, anisotropy: 0.5, anisotropyRotation: Math.PI / 2 };
-    const capMat = new THREE.MeshPhysicalMaterial(metal);
-    const edgeMat = new THREE.MeshPhysicalMaterial({ ...metal, emissive: "#dce8ff", emissiveIntensity: 0 });
+    const capMat = new THREE.MeshPhysicalNodeMaterial(metal);
+    const edgeMat = new THREE.MeshPhysicalNodeMaterial({ ...metal, emissive: "#dce8ff", emissiveIntensity: 0 });
     rig.faces = [frontMat, backMat];
     rig.edge = edgeMat;
 
-    const net = buildNetwork(mask);
-    const netUniforms = rig.network;
-    const pointMat = new THREE.ShaderMaterial({
-      vertexShader: netVert,
-      fragmentShader: pointFrag,
-      uniforms: netUniforms,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    const lineMat = new THREE.ShaderMaterial({
-      vertexShader: netVert,
-      fragmentShader: lineFrag,
-      uniforms: netUniforms,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    });
-    return { body, frontFace, backFace, frontMat, backMat, capMat, edgeMat, net, pointMat, lineMat };
+    return { body, frontFace, backFace, frontMat, backMat, capMat, edgeMat, net: buildNetwork(mask, rig.network) };
   }, [front, back, mask, name, rig, gl]);
+
+  // Node materials only honour envMapIntensity (which Scene animates) when envMap is their own,
+  // so hand them the scene's environment once it exists (WebGLRenderer did this implicitly).
+  useFrame(() => {
+    const env = scene.environment;
+    if (!env || parts.frontMat.envMap === env) return;
+    for (const m of [parts.frontMat, parts.backMat, parts.capMat, parts.edgeMat]) {
+      m.envMap = env;
+      m.needsUpdate = true;
+    }
+  });
 
   useEffect(
     () => () => {
-      for (const g of [parts.body, parts.frontFace, parts.backFace, parts.net.points, parts.net.lines]) g.dispose();
-      for (const m of [parts.frontMat, parts.backMat, parts.capMat, parts.edgeMat, parts.pointMat, parts.lineMat]) m.dispose();
+      for (const g of [parts.body, parts.frontFace, parts.backFace, parts.net.lines]) g.dispose();
+      for (const m of [parts.frontMat, parts.backMat, parts.capMat, parts.edgeMat, parts.net.pointMat, parts.net.lineMat]) m.dispose();
     },
     [parts],
   );
@@ -344,8 +349,8 @@ export function Card({ rig, children }: { rig: Rig; children?: ReactNode }) {
       <mesh geometry={parts.body} material={[parts.capMat, parts.edgeMat]} />
       <mesh geometry={parts.frontFace} material={parts.frontMat} position-z={FACE_Z} />
       <mesh geometry={parts.backFace} material={parts.backMat} position-z={-FACE_Z} rotation-y={Math.PI} />
-      <points geometry={parts.net.points} material={parts.pointMat} frustumCulled={false} />
-      <lineSegments geometry={parts.net.lines} material={parts.lineMat} frustumCulled={false} />
+      <primitive object={parts.net.points} />
+      <lineSegments geometry={parts.net.lines} material={parts.net.lineMat} frustumCulled={false} />
       {children}
     </group>
   );

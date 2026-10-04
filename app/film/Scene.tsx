@@ -1,29 +1,54 @@
 "use client";
 
 import { getProject, type ISheetObject } from "@theatre/core";
-import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
+import { Canvas, extend, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef } from "react";
-import * as THREE from "three";
-import { RectAreaLightUniformsLib } from "three/examples/jsm/lights/RectAreaLightUniformsLib.js";
-import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer.js";
-import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
-import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
-import { SMAAPass } from "three/examples/jsm/postprocessing/SMAAPass.js";
-import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
-import { Assemble } from "./Assemble";
+import * as THREE from "three/webgpu";
+import {
+  Fn,
+  If,
+  dot,
+  floor,
+  fract,
+  instancedBufferAttribute,
+  min,
+  mix,
+  mod,
+  modelViewMatrix,
+  pass,
+  pow,
+  renderOutput,
+  sin,
+  smoothstep,
+  step,
+  texture,
+  uniform,
+  uv,
+  varying,
+  vec2,
+  vec3,
+  vec4,
+} from "three/tsl";
+import { bloom } from "three/examples/jsm/tsl/display/BloomNode.js";
+import { smaa } from "three/examples/jsm/tsl/display/SMAANode.js";
+import { RectAreaLightTexturesLib } from "three/examples/jsm/lights/RectAreaLightTexturesLib.js";
 import { Card, FACE_Z, createRig } from "./Card";
-import { bokehGLSL, clock, cocGLSL, lens, motion, streakGLSL } from "./clock";
+import { clock } from "./clock";
 import { Constellation } from "./Constellation";
 import { finale } from "./copy";
 import { DOOR_H, Doors } from "./Doors";
-import { Talent, type TalentU } from "./Intro";
-import { PathTrace, type PathU } from "./PathTrace";
+import { Emergence } from "./Emergence";
+import { Talent } from "./Intro";
+import { PathTrace } from "./PathTrace";
 import { STAGES, pointAt, stageTime } from "./path";
 import { sound } from "./sound";
 import { DOORS_Z, buildState, defaults } from "./storyboard";
+import { bokehAlpha, bokehScale, coc, lens, makeDoorsU, makeEmergeU, makePathU, makeTalentU, motion, streakSize, quality } from "./tsl";
 
-RectAreaLightUniformsLib.init();
+// Node materials (and the rest of three/webgpu) as JSX elements.
+extend(THREE as unknown as Parameters<typeof extend>[0]);
+// Rect area lights on the node renderer need the LTC tables handed over once.
+THREE.RectAreaLightNode.setLTC(RectAreaLightTexturesLib.init() as unknown as Parameters<typeof THREE.RectAreaLightNode.setLTC>[0]);
 
 const SHEET = "Film";
 const studioMode =
@@ -63,7 +88,7 @@ function useStudioEnvironment() {
     box(1, 7, "#6a90da", [5, 0, -3]);
     box(5, 3, "#2a3c66", [0, 0.5, 7]);
     box(12, 12, "#0c1430", [0, -6, 0]);
-    const pmrem = new THREE.PMREMGenerator(gl);
+    const pmrem = new THREE.PMREMGenerator(gl as unknown as THREE.WebGPURenderer);
     const tex = pmrem.fromScene(env, 0.02).texture;
     scene.environment = tex;
     return () => {
@@ -79,123 +104,117 @@ function useStudioEnvironment() {
   }, [gl, scene]);
 }
 
-const dustVert = /* glsl */ `
-${cocGLSL}
-${streakGLSL}
-uniform float uTime;
-attribute float aSeed;
-varying float vA;
-varying float vC;
-void main() {
-  vec3 p = position;
-  p.y += mod(uTime * (0.03 + aSeed * 0.04) + aSeed * 10.0, 10.0) - 5.0;
-  p.x += sin(uTime * 0.2 + aSeed * 30.0) * 0.15;
-  vec4 mv = modelViewMatrix * vec4(p, 1.0);
-  gl_Position = projectionMatrix * mv;
-  vC = coc(-mv.z);
-  gl_PointSize = (1.0 + aSeed * 2.5) * 22.0 / -mv.z * (1.0 + vC * 2.5) * streakSize(uVel);
-  vA = 0.25 + aSeed * 0.75;
-}`;
-const dustFrag = /* glsl */ `
-${bokehGLSL}
-${streakGLSL}
-uniform float uOpacity;
-varying float vA;
-varying float vC;
-void main() {
-  float a = bokehAlpha(streakCoord(gl_PointCoord, uVel), vC);
-  gl_FragColor = vec4(vec3(0.75, 0.85, 1.0), a * vA * uOpacity * 0.5);
-}`;
+type F = THREE.UniformNode<"float", number>;
 
-function Dust({ uniforms }: { uniforms: Record<string, { value: number }> }) {
-  const geo = useMemo(() => {
+// 900 motes drifting up through the whole set, as instanced sprites (WebGPU has no point size).
+function Dust({ u }: { u: { uTime: F; uOpacity: F; uPx: F } }) {
+  const sprite = useMemo(() => {
     const n = 900;
-    const p = new Float32Array(n * 3);
-    const s = new Float32Array(n);
+    const d = new Float32Array(n * 4); // xyz, seed
     for (let i = 0; i < n; i++) {
-      p.set([(Math.random() - 0.5) * 12, (Math.random() - 0.5) * 10, 4 - Math.random() * 26], i * 3);
-      s[i] = Math.random();
+      d.set([(Math.random() - 0.5) * 12, (Math.random() - 0.5) * 10, 4 - Math.random() * 26, Math.random()], i * 4);
     }
-    const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(p, 3));
-    g.setAttribute("aSeed", new THREE.BufferAttribute(s, 1));
-    return g;
-  }, []);
-  useEffect(() => () => geo.dispose(), [geo]);
-  return (
-    <points geometry={geo} frustumCulled={false}>
-      <shaderMaterial
-        vertexShader={dustVert}
-        fragmentShader={dustFrag}
-        uniforms={uniforms}
-        transparent
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
-      />
-    </points>
-  );
+    const a = instancedBufferAttribute<"vec4">(new THREE.InstancedBufferAttribute(d, 4), "vec4");
+    const seed = a.w;
+    const p = vec3(
+      a.x.add(sin(u.uTime.mul(0.2).add(seed.mul(30))).mul(0.15)),
+      a.y.add(mod(u.uTime.mul(seed.mul(0.04).add(0.03)).add(seed.mul(10)), 10).sub(5)),
+      a.z,
+    );
+    const c = varying(coc(modelViewMatrix.mul(vec4(p, 1)).z.negate()));
+    // The old point's footprint: (1 + seed·2.5)·22 px at 1/depth (uPx: world size of one
+    // drawing-buffer pixel at depth 1), grown by the bokeh, and streaked with scroll speed
+    // (the GLSL kept the width and stretched the height by streakSize).
+    const size = seed.mul(2.5).add(1).mul(22).mul(u.uPx).mul(bokehScale(c));
+    const m = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    m.positionNode = p;
+    m.scaleNode = vec2(size, size.mul(streakSize(motion.vel)));
+    m.colorNode = vec3(0.75, 0.85, 1);
+    m.opacityNode = bokehAlpha(uv(), c).mul(seed.mul(0.75).add(0.25)).mul(u.uOpacity).mul(0.5);
+    const s = new THREE.Sprite(m);
+    s.count = n;
+    s.frustumCulled = false;
+    return s;
+  }, [u]);
+  useEffect(() => () => sprite.material.dispose(), [sprite]);
+  return <primitive object={sprite} />;
 }
 
 // Soft light from behind the card, plus a volumetric beam from above; both travel with the card.
-const hazeFrag = /* glsl */ `
-uniform float uHaze;
-varying vec2 vUv;
-void main() {
-  float d = length((vUv - vec2(0.5, 0.55)) * vec2(1.0, 1.3));
-  gl_FragColor = vec4(vec3(0.06, 0.12, 0.3) * smoothstep(0.6, 0.0, d) * uHaze, 1.0);
-}`;
-const beamFrag = /* glsl */ `
-uniform float uBeam;
-varying vec2 vUv;
-void main() {
-  float along = smoothstep(0.0, 0.9, vUv.y) * smoothstep(1.0, 0.75, vUv.y);
-  float across = pow(sin(vUv.x * 3.14159), 6.0);
-  gl_FragColor = vec4(vec3(0.6, 0.75, 1.0) * along * across * uBeam * 0.22, 1.0);
-}`;
+const additive = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending };
+function hazeMaterial(uHaze: F) {
+  const m = new THREE.MeshBasicNodeMaterial(additive);
+  const d = uv().sub(vec2(0.5, 0.55)).mul(vec2(1, 1.3)).length();
+  m.colorNode = vec3(0.021, 0.042, 0.105).mul(smoothstep(0.6, 0, d)).mul(uHaze);
+  return m;
+}
+function beamMaterial(uBeam: F) {
+  const m = new THREE.MeshBasicNodeMaterial({ ...additive, side: THREE.DoubleSide });
+  const y = uv().y;
+  const along = smoothstep(0, 0.9, y).mul(smoothstep(1, 0.75, y));
+  const across = pow(sin(uv().x.mul(Math.PI)), 6);
+  m.colorNode = vec3(0.6, 0.75, 1).mul(along).mul(across).mul(uBeam).mul(0.22);
+  return m;
+}
+
+const hash = (p: THREE.Node<"vec2">) => fract(sin(dot(p, vec2(127.1, 311.7))).mul(43758.5453));
+
+// The post chain: scene → bloom (half resolution) → fracture → tone map + sRGB → SMAA.
+// No MSAA: 4x multisampling on a half-float target cost 2-3x the whole frame on integrated
+// GPUs (measured: 54 → 165 fps on the doors). SMAA at the end smooths edges for a fraction.
 // Act transitions: for a beat the picture fractures along the card's own circuit. Blocks
 // slide only along their trace direction (never diagonal noise), the cracks light up blue,
 // and colour splits along the crack. The same pass adds a faint vertical split at scroll speed.
-const FractureShader = {
-  uniforms: {
-    tDiffuse: { value: null },
-    uMask: { value: null as THREE.Texture | null },
-    uShift: { value: 0 },
-    uTime: { value: 0 },
-    uAspect: { value: 1 },
-    uVel: { value: 0 },
-  },
-  vertexShader: /* glsl */ `
-varying vec2 vUv;
-void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-  fragmentShader: /* glsl */ `
-uniform sampler2D tDiffuse, uMask;
-uniform float uShift, uTime, uAspect, uVel;
-varying vec2 vUv;
-float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-void main() {
-  vec2 g = vec2(uAspect, 1.0) * 11.0;
-  vec2 cell = floor(vUv * g);
-  float tick = floor(uTime * 18.0);
-  float hit = step(1.0 - 0.5 * uShift, hash(cell + tick * 0.37));
-  float horiz = step(0.5, hash(cell * 1.7 + 3.1));
-  vec2 dir = mix(vec2(0.0, 1.0), vec2(1.0, 0.0), horiz);
-  vec2 uv = vUv + dir * (hash(cell + tick + 9.0) - 0.5) * 0.06 * uShift * hit;
-  vec2 ca = dir * 0.007 * uShift * (0.3 + hit) + vec2(0.0, 0.0012) * uVel;
-  vec3 c = vec3(texture2D(tDiffuse, uv + ca).r, texture2D(tDiffuse, uv).g, texture2D(tDiffuse, uv - ca).b);
-  vec2 f = fract(vUv * g);
-  float border = hit * (1.0 - smoothstep(0.0, 0.035, min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y))));
-  float m = texture2D(uMask, fract(vUv * vec2(uAspect, 1.0) * 0.85 + vec2(0.12, 0.3))).r;
-  c += vec3(0.45, 0.78, 1.0) * (border * 0.9 + m * 0.55) * uShift;
-  gl_FragColor = vec4(c, 1.0);
-}`,
-};
-
-const uvVert = /* glsl */ `
-varying vec2 vUv;
-void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+function createPost(renderer: THREE.WebGPURenderer, scene: THREE.Scene, camera: THREE.Camera, mask: THREE.Texture) {
+  const scenePass = pass(scene, camera);
+  const sceneTex = scenePass.getTextureNode("output");
+  // Bloom at half resolution: it is a blur, nobody sees the difference, and it costs a quarter.
+  const bloomPass = bloom(sceneTex, 0.6, 0.55, 0.82).setResolutionScale(0.5);
+  // r186 runtime name (its @types call it getTexture).
+  const bloomTex = (bloomPass as unknown as { getTextureNode(): THREE.TextureNode }).getTextureNode();
+  const u = { shift: uniform(0), time: uniform(0), aspect: uniform(1) };
+  const col = (q: THREE.Node<"vec2">) => sceneTex.sample(q).rgb.add(bloomTex.sample(q).rgb);
+  const fracture = Fn(() => {
+    const vUv = uv();
+    const out = col(vUv).toVar();
+    // Between transitions and at rest: just the bloomed frame, none of the fracture math.
+    If(u.shift.greaterThan(0.01).or(motion.vel.greaterThan(0.15)), () => {
+      const g = vec2(u.aspect, 1).mul(11);
+      const cell = floor(vUv.mul(g));
+      const tick = floor(u.time.mul(18));
+      const hit = step(u.shift.mul(-0.5).add(1), hash(cell.add(tick.mul(0.37))));
+      const horiz = step(0.5, hash(cell.mul(1.7).add(3.1)));
+      const dir = mix(vec2(0, 1), vec2(1, 0), horiz);
+      const q = vUv.add(dir.mul(hash(cell.add(tick).add(9)).sub(0.5).mul(0.06).mul(u.shift).mul(hit)));
+      const ca = dir.mul(u.shift.mul(0.007).mul(hit.add(0.3))).add(vec2(0, 0.0012).mul(motion.vel));
+      const c = vec3(col(q.add(ca)).r, col(q).g, col(q.sub(ca)).b);
+      const f = fract(vUv.mul(g));
+      const border = hit.mul(smoothstep(0, 0.035, min(min(f.x, f.x.oneMinus()), min(f.y, f.y.oneMinus()))).oneMinus());
+      const m = texture(mask, fract(vUv.mul(vec2(u.aspect, 1)).mul(0.85).add(vec2(0.12, 0.3)))).r;
+      out.assign(c.add(vec3(0.45, 0.78, 1).mul(border.mul(0.9).add(m.mul(0.55))).mul(u.shift)));
+    });
+    return vec4(out, 1);
+  });
+  const pipeline = new THREE.RenderPipeline(renderer);
+  // Tone mapping and sRGB before SMAA, as the WebGL chain had it (OutputPass → SMAAPass):
+  // edge detection on display values finds the edges in this dark film.
+  pipeline.outputColorTransform = false;
+  const aa = smaa(renderOutput(fracture(), THREE.NeutralToneMapping, THREE.SRGBColorSpace));
+  pipeline.outputNode = aa;
+  const dispose = () => {
+    pipeline.dispose();
+    scenePass.dispose();
+    bloomPass.dispose();
+    aa.dispose();
+  };
+  return { pipeline, scenePass, bloom: bloomPass, u, dispose };
+}
 
 function Film({ onReady }: { onReady: () => void }) {
-  const { gl, scene, camera, size } = useThree();
+  const three = useThree();
+  const { scene, camera, size } = three;
+  // R3F types the renderer as WebGLRenderer; the Canvas below hands it a WebGPURenderer.
+  const gl = three.gl as unknown as THREE.WebGPURenderer;
   const cam = camera as THREE.PerspectiveCamera;
   const rig = useMemo(createRig, []);
   const key = useRef<THREE.DirectionalLight>(null);
@@ -207,30 +226,24 @@ function Film({ onReady }: { onReady: () => void }) {
 
   const live = useMemo(
     () => ({
-      dust: { uTime: { value: 0 }, uOpacity: { value: 0 }, ...lens, ...motion },
-      haze: { uHaze: { value: 0 } },
-      beam: { uBeam: { value: 0 } },
-      path: {
-        uHead: { value: 0 },
-        uAlpha: { value: 0 },
-        uTime: { value: 0 },
-        uAhead: { value: 0 },
-        uRecap: { value: -1 },
-        uLift: { value: 0 },
-      } satisfies PathU,
-      doors: { uAlpha: { value: 0 }, uCardZ: { value: 0 }, uTime: { value: 0 } },
-      talent: {
-        uTalent: { value: 0 },
-        uChosen: { value: 0 },
-        uTime: { value: 0 },
-        uStreams: { value: 0 },
-        uFieldZ: { value: 0 },
-        uCursor: { value: new THREE.Vector3() },
-        uCursorOn: { value: 0 },
-      } satisfies TalentU,
-      assemble: { uForm: { value: 0 }, uTime: { value: 0 } },
+      dust: { uTime: uniform(0), uOpacity: uniform(0), uPx: uniform(0) },
+      haze: uniform(0),
+      beam: uniform(0),
+      path: makePathU(),
+      doors: makeDoorsU(),
+      talent: makeTalentU(),
+      emerge: makeEmergeU(),
     }),
     [],
+  );
+  const hazeMat = useMemo(() => hazeMaterial(live.haze), [live]);
+  const beamMat = useMemo(() => beamMaterial(live.beam), [live]);
+  useEffect(
+    () => () => {
+      hazeMat.dispose();
+      beamMat.dispose();
+    },
+    [hazeMat, beamMat],
   );
   const tmp = useMemo(
     () => ({
@@ -253,35 +266,10 @@ function Film({ onReady }: { onReady: () => void }) {
 
   useStudioEnvironment();
 
-  const composer = useMemo(() => {
-    // No MSAA: 4x multisampling on a half-float target cost 2-3x the whole frame on integrated
-    // GPUs (measured: 54 → 165 fps on the doors). SMAA at the end smooths edges for a fraction.
-    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType });
-    const c = new EffectComposer(gl, rt);
-    c.addPass(new RenderPass(scene, camera));
-    // Bloom at half resolution: it is a blur, nobody sees the difference, and it costs a quarter.
-    const bloomPass = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.55, 0.82);
-    const fullSize = bloomPass.setSize.bind(bloomPass);
-    bloomPass.setSize = (w: number, h: number) => fullSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
-    c.addPass(bloomPass);
-    c.addPass(new ShaderPass(FractureShader));
-    c.addPass(new OutputPass());
-    c.addPass(new SMAAPass());
-    return c;
-  }, [gl, scene, camera]);
-  const bloom = composer.passes[1] as UnrealBloomPass;
-  const shift = composer.passes[2] as ShaderPass;
   const circuitMask = useLoader(THREE.TextureLoader, "/images/circuit-mask.png");
-  useEffect(() => {
-    shift.uniforms.uMask.value = circuitMask;
-  }, [shift, circuitMask]);
-
-  const dpr = useThree((s) => s.viewport.dpr);
+  const post = useMemo(() => createPost(gl, scene, camera, circuitMask), [gl, scene, camera, circuitMask]);
+  useEffect(() => post.dispose, [post]);
   const setDpr = useThree((s) => s.setDpr);
-  useEffect(() => {
-    composer.setPixelRatio(dpr);
-    composer.setSize(size.width, size.height);
-  }, [composer, dpr, size]);
 
   // Adaptive quality: hold ~60 fps by stepping the render scale down ~15% at a time on weak
   // GPUs, back up when there's headroom. DPR is capped at 1.5: above that nobody sees the
@@ -291,7 +279,6 @@ function Film({ onReady }: { onReady: () => void }) {
     const top = Math.min(typeof window === "undefined" ? 1 : window.devicePixelRatio, 1.5);
     return [1, 0.85, 0.72, 0.6].map((k) => Math.max(0.6, top * k)).filter((v, i, a) => i === 0 || v < a[i - 1] - 0.01);
   }, []);
-  useEffect(() => () => composer.dispose(), [composer]);
 
   const anchors = useRef<{ stage: HTMLElement[]; door: HTMLElement[] }>({ stage: [], door: [] });
   const labelW = useRef<number[]>([]);
@@ -351,8 +338,8 @@ function Film({ onReady }: { onReady: () => void }) {
   // Profiling hook, only with ?debug in the URL: lets DevTools toggle parts of the scene.
   useEffect(() => {
     if (!window.location.search.includes("debug")) return;
-    (window as unknown as { __film?: unknown }).__film = { scene, gl, rig, composer, gov, lights: { key, rim, box, strip } };
-  }, [scene, gl, rig, composer]);
+    (window as unknown as { __film?: unknown }).__film = { scene, gl, rig, post, gov, lights: { key, rim, box, strip } };
+  }, [scene, gl, rig, post]);
 
   const ready = useRef(false);
   const warming = useRef(false);
@@ -370,15 +357,21 @@ function Film({ onReady }: { onReady: () => void }) {
         g.t = 0;
         g.n = 0;
         g.good = fps > 58 ? g.good + 1 : 0;
-        if (fps < 45 && g.step < ladder.length - 1 && g.cool <= 0) {
+        // Steps: halve the particle budget first (cheapest to lose), then lower the render scale.
+        const steps = ladder.length + 1;
+        const apply = () => {
+          quality.particles = g.step >= 1 ? 0.5 : 1;
+          setDpr(ladder[Math.max(0, g.step - 1)]);
+        };
+        if (fps < 45 && g.step < steps - 1 && g.cool <= 0) {
           g.step++;
           g.cool = 2.5;
-          setDpr(ladder[g.step]);
+          apply();
         } else if (g.good >= 4 && g.step > 0 && g.cool <= 0) {
           g.step--;
           g.cool = 4;
           g.good = 0;
-          setDpr(ladder[g.step]);
+          apply();
         }
       }
     }
@@ -466,18 +459,23 @@ function Film({ onReady }: { onReady: () => void }) {
       cam.updateProjectionMatrix();
     }
 
+    const areaK = 1 - THREE.MathUtils.smoothstep(C.follow, 0.4, 0.9);
     // Lights travel with the card; in the finale the softbox follows the cursor across the metal.
     if (card) {
       const c = card.position;
       if (box.current) {
         box.current.position.set(c.x - 2.4 + p.sx * 1.6 * F.interact, c.y + 1.2 - p.sy * 0.8 * F.interact, c.z + 2.6);
         box.current.lookAt(c);
-        box.current.intensity = L.area * LIGHT;
+        // Area lights cost half the frame in the macro path shot (measured 39 → 77 fps without
+        // them); there the card fills the screen and the studio env carries the reflections.
+        box.current.intensity = L.area * LIGHT * areaK;
+        box.current.visible = areaK > 0.01;
       }
       if (strip.current) {
         strip.current.position.set(c.x + 2.6, c.y + 0.3, c.z + 0.8);
         strip.current.lookAt(c);
-        strip.current.intensity = L.area * 0.6 * LIGHT;
+        strip.current.intensity = L.area * 0.6 * LIGHT * areaK;
+        strip.current.visible = areaK > 0.01;
       }
       if (rim.current) {
         rim.current.position.set(c.x + 1.5, c.y + 3.5, c.z - 3.5);
@@ -509,15 +507,13 @@ function Film({ onReady }: { onReady: () => void }) {
     const pv = prev.current;
     pv.vel += (clock.v - pv.vel) * Math.min(1, dt * (clock.v > pv.vel ? 8 : 3));
     const vel = pv.vel < 0.004 ? 0 : pv.vel;
-    motion.uVel.value = vel;
-    shift.uniforms.uShift.value = A.shift;
-    shift.uniforms.uTime.value = t;
-    shift.uniforms.uAspect.value = size.width / size.height;
-    shift.uniforms.uVel.value = vel;
-    shift.enabled = A.shift > 0.01 || vel > 0.15;
+    motion.vel.value = vel;
+    post.u.shift.value = A.shift;
+    post.u.time.value = t;
+    post.u.aspect.value = size.width / size.height;
     rig.network.uTime.value = t;
     rig.network.uSize.value = 22 * gl.getPixelRatio();
-    if (rig.faces[0]) rig.faces[0].envMapIntensity = L.env;
+    if (rig.faces[0]) rig.faces[0].envMapIntensity = L.env * (1 + 0.45 * (1 - areaK));
     if (rig.faces[1]) rig.faces[1].envMapIntensity = L.env * 0.5;
     if (rig.edge) {
       rig.edge.emissiveIntensity = L.edge * 0.6 + h.charge * 2.5;
@@ -526,8 +522,10 @@ function Film({ onReady }: { onReady: () => void }) {
 
     live.dust.uTime.value = t;
     live.dust.uOpacity.value = A.dust;
-    live.haze.uHaze.value = A.haze * 0.6;
-    live.beam.uBeam.value = L.beam * 0.5;
+    // World size of one drawing-buffer pixel at depth 1 (the old points were sized in pixels).
+    live.dust.uPx.value = (2 * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2)) / (size.height * gl.getPixelRatio());
+    live.haze.value = A.haze * 0.6;
+    live.beam.value = L.beam * 0.5;
     live.path.uHead.value = P.progress;
     live.path.uAlpha.value = P.alpha;
     live.path.uTime.value = t;
@@ -541,8 +539,8 @@ function Film({ onReady }: { onReady: () => void }) {
       }
     }
     live.path.uAhead.value = ahead;
-    live.assemble.uForm.value = K.form;
-    live.assemble.uTime.value = t;
+    live.emerge.uForm.value = K.form;
+    live.emerge.uTime.value = t;
     live.doors.uAlpha.value = v("Doors").alpha;
     live.doors.uCardZ.value = K.z;
     live.doors.uTime.value = t;
@@ -559,10 +557,10 @@ function Film({ onReady }: { onReady: () => void }) {
       const k = (K.z - cam.position.z) / (tmp.ray.z || -1);
       live.talent.uCursor.value.copy(cam.position).addScaledVector(tmp.ray, k);
     }
-    bloom.strength = A.bloom * 0.7 + h.charge * 0.45 + burstMix * 0.3;
+    post.bloom.strength.value = A.bloom * 0.7 + h.charge * 0.45 + burstMix * 0.3;
     // Focus sits on what the shot is about: the path head, or the card.
-    lens.uFocus.value = cam.position.distanceTo(tmp.target);
-    lens.uBokeh.value = A.dof;
+    lens.focus.value = cam.position.distanceTo(tmp.target);
+    lens.bokeh.value = A.dof;
     gl.toneMappingExposure = A.exposure;
 
     // Sound (no-ops unless the visitor turned it on): events fire on forward crossings only.
@@ -607,10 +605,10 @@ function Film({ onReady }: { onReady: () => void }) {
     });
   }, -1);
 
-  useFrame((_, dt) => {
+  useFrame(() => {
     // The end credits cover the screen: nothing to show, nothing to render.
     if (clock.covered && ready.current) return;
-    composer.render(dt);
+    post.pipeline.render();
     if (!ready.current && rig.card && !warming.current) {
       // Shader warm-up behind the loading screen: every program compiles now, in parallel where
       // the driver allows, instead of hitching the first time a door or the constellation appears.
@@ -622,12 +620,13 @@ function Film({ onReady }: { onReady: () => void }) {
           o.visible = true;
         }
       });
-      shift.enabled = true;
-      gl.compileAsync(scene, camera)
+      // Compiled for the scene pass target (half-float), which is where the scene is drawn.
+      post.scenePass
+        .compileAsync(gl)
         .catch(() => {})
         .then(() => {
           for (const o of hidden) o.visible = false;
-          composer.render(0); // also compiles the post passes (fracture is on for this frame)
+          post.pipeline.render(); // also compiles the post chain (the fracture branch is in the same shader)
           ready.current = true;
           onReady();
         });
@@ -636,40 +635,26 @@ function Film({ onReady }: { onReady: () => void }) {
 
   return (
     <>
-      {/* Neutral tone mapping subtracts a dark offset from this; on screen it lands near --void (#111c3d). */}
-      <color attach="background" args={["#30354c"]} />
+      {/* Neutral tone mapping subtracts an offset set by the darkest channel; this input lands on
+          the approved navy #0f1d4d on screen (solved for the offset, then measured). */}
+      <color attach="background" args={["#2e3558"]} />
       <directionalLight ref={key} position={[-2.5, 2.5, 4]} color="#e6eeff" intensity={0} />
       <rectAreaLight ref={box} width={2.2} height={3.2} color="#eef4ff" intensity={0} />
       <rectAreaLight ref={strip} width={0.35} height={3.6} color="#9fc4ff" intensity={0} />
       <spotLight ref={rim} angle={0.5} penumbra={1} color="#9fc4ff" intensity={0} decay={1.6} />
       <mesh ref={haze} scale={[26, 18, 1]}>
         <planeGeometry />
-        <shaderMaterial
-          vertexShader={uvVert}
-          fragmentShader={hazeFrag}
-          uniforms={live.haze}
-          depthWrite={false}
-          transparent
-          blending={THREE.AdditiveBlending}
-        />
+        <primitive object={hazeMat} attach="material" />
       </mesh>
       <mesh ref={beam} rotation={[0, 0, -0.22]}>
         <cylinderGeometry args={[0.25, 1.6, 7, 48, 1, true]} />
-        <shaderMaterial
-          vertexShader={uvVert}
-          fragmentShader={beamFrag}
-          uniforms={live.beam}
-          transparent
-          depthWrite={false}
-          blending={THREE.AdditiveBlending}
-          side={THREE.DoubleSide}
-        />
+        <primitive object={beamMat} attach="material" />
       </mesh>
-      <Dust uniforms={live.dust} />
+      <Dust u={live.dust} />
       <Talent u={live.talent} />
       <Doors u={live.doors} />
       <Card rig={rig}>
-        <Assemble u={live.assemble} />
+        <Emergence u={live.emerge} />
         <PathTrace u={live.path} />
         <Constellation u={live.path} />
       </Card>
@@ -681,7 +666,18 @@ export default function Scene({ onReady }: { onReady: () => void }) {
   return (
     <Canvas
       dpr={[1, 1.5]}
-      gl={{ antialias: true, powerPreference: "high-performance" }}
+      gl={async (props) => {
+        // WebGPU where the browser has it, WebGL2 otherwise (automatic); ?webgl forces the fallback.
+        // No MSAA (see createPost): SMAA in the post chain smooths the edges.
+        const r = new THREE.WebGPURenderer({
+          ...(props as object),
+          antialias: false,
+          powerPreference: "high-performance",
+          forceWebGL: window.location.search.includes("webgl"),
+        });
+        await r.init();
+        return r;
+      }}
       camera={{ fov: 30, near: 0.05, far: 80, position: [0, 0, 6] }}
       onCreated={({ gl }) => {
         // Neutral keeps the artwork's colours and the navy ground true; ACES shifted both.

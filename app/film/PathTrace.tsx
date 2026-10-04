@@ -5,25 +5,33 @@
 
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import * as THREE from "three";
+import * as THREE from "three/webgpu";
+import {
+  abs,
+  attribute,
+  clamp,
+  exp,
+  float,
+  fract,
+  fwidth,
+  length,
+  max,
+  mix,
+  select,
+  sin,
+  smoothstep,
+  uv,
+  vec3,
+} from "three/tsl";
 import { FACE_Z } from "./Card";
 import { PATH, PATH_S, STAGES, pointAt } from "./path";
+import type { PathU } from "./tsl";
 
-type Num = { value: number };
-/** Shared with Constellation; Scene writes it every frame. */
-export type PathU = {
-  uHead: Num;
-  uAlpha: Num;
-  uTime: Num;
-  /** Arc fraction the next stage is pre-lit to (staged funding); ≤ uHead means none. */
-  uAhead: Num;
-  /** Position of the achievement wave along the arc, -0.2…1.2. */
-  uRecap: Num;
-  /** Constellation lift, 0…1. */
-  uLift: Num;
-};
+export type { PathU } from "./tsl";
 
-/** Additive glow over the card face; shared with Constellation. */
+type F = THREE.Node<"float">;
+
+/** Additive glow over the card face (node-material options); shared with Constellation. */
 export const GLOW = {
   transparent: true,
   depthWrite: false,
@@ -37,6 +45,7 @@ export const GLOW = {
 const Z = FACE_Z + 0.0012;
 const HALF = 0.0034;
 const NODE_HALF = 0.05;
+const BLUE = () => vec3(0.45, 0.78, 1.0);
 
 // Ribbon: one strip with mitred joins, so corners never overlap or gap.
 function buildRibbon() {
@@ -77,7 +86,7 @@ function buildRibbon() {
   return g;
 }
 
-// Nodes: one quad per stage, ring + core + arrival flash drawn in the shader.
+// Nodes: one quad per stage, ring + core + arrival flash drawn in the material.
 function buildNodes() {
   const pos: number[] = [];
   const local: number[] = [];
@@ -101,85 +110,68 @@ function buildNodes() {
   return g;
 }
 
-const ribbonVert = /* glsl */ `
-attribute float aS;
-attribute float aX;
-varying float vS;
-varying float vX;
-void main() {
-  vS = aS;
-  vX = aX;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
 // Lit up to uHead (with the recap wave riding it); dim dashed "allocated" stretch up to uAhead.
-const ribbonFrag = /* glsl */ `
-uniform float uHead, uAlpha, uAhead, uRecap, uLift;
-varying float vS;
-varying float vX;
-void main() {
-  float front = max(uHead, uAhead);
-  if (vS > front) discard;
-  float across = 1.0 - smoothstep(0.45, 1.0, abs(vX));
-  float b;
-  if (vS <= uHead) {
-    float tip = smoothstep(uHead, uHead - 0.003, vS);
-    float w = (vS - uRecap) / 0.02;
-    b = tip * (1.2 + 7.0 * exp(-(uHead - vS) * 35.0) + 6.0 * exp(-w * w));
-  } else {
-    float dash = 1.0 - smoothstep(0.4, 0.6, fract(vS * 260.0));
-    b = 0.42 * dash + 6.0 * exp(-(front - vS) * 300.0);
-  }
-  b *= 1.0 - 0.55 * uLift;
-  gl_FragColor = vec4(vec3(0.45, 0.78, 1.0) * b, across * uAlpha);
-}`;
-
-const nodeVert = /* glsl */ `
-attribute vec2 aL;
-attribute float aS;
-varying vec2 vL;
-varying float vS;
-void main() {
-  vL = aL;
-  vS = aS;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-}`;
-const nodeFrag = /* glsl */ `
-uniform float uHead, uAlpha, uRecap, uLift;
-varying vec2 vL;
-varying float vS;
-float band(float r, float a, float b, float aa) {
-  return smoothstep(a - aa, a, r) * (1.0 - smoothstep(b, b + aa, r));
+function ribbonMaterial(u: PathU) {
+  const vS = attribute<"float">("aS", "float");
+  const vX = attribute<"float">("aX", "float");
+  const front = max(u.uHead, u.uAhead);
+  const across = smoothstep(0.45, 1, abs(vX)).oneMinus();
+  const tip = smoothstep(u.uHead.sub(0.003), u.uHead, vS).oneMinus();
+  const w = vS.sub(u.uRecap).div(0.02);
+  const lit = tip.mul(
+    exp(u.uHead.sub(vS).mul(-35))
+      .mul(7)
+      .add(1.2)
+      .add(exp(w.mul(w).negate()).mul(6)),
+  );
+  const dash = smoothstep(0.4, 0.6, fract(vS.mul(260))).oneMinus();
+  const ahead = dash.mul(0.42).add(exp(front.sub(vS).mul(-300)).mul(6));
+  const b = select(vS.lessThanEqual(u.uHead), lit, ahead).mul(u.uLift.mul(0.55).oneMinus());
+  const m = new THREE.MeshBasicNodeMaterial(GLOW);
+  m.maskNode = vS.lessThanEqual(front); // discard beyond the front
+  m.colorNode = BLUE().mul(b);
+  m.opacityNode = across.mul(u.uAlpha);
+  return m;
 }
-// Expanding ring as a front (the pulse head, or the recap wave) passes this node.
-float flash(float h, float r, float aa) {
-  float f = clamp((h - vS) / 0.08, 0.0, 1.0);
-  float fr = mix(0.012, 0.048, f);
-  return smoothstep(vS - 0.002, vS, h) * (1.0 - f) * band(r, fr - 0.003, fr, aa);
-}
-void main() {
-  float r = length(vL);
-  float aa = max(fwidth(r), 0.0005);
-  float lit = smoothstep(vS - 0.002, vS, uHead);
-  float shape = band(r, 0.008, 0.012, aa) + 1.0 - smoothstep(0.004, 0.004 + aa, r);
-  float fl = flash(uHead, r, aa) + flash(uRecap, r, aa);
-  float b = shape * mix(0.6, 3.5, lit) + fl * 5.0;
-  float a = (shape * mix(0.25, 1.0, lit) + fl) * uAlpha * (1.0 - uLift);
-  gl_FragColor = vec4(vec3(0.45, 0.78, 1.0) * b, a);
-}`;
 
-const headFrag = /* glsl */ `
-uniform float uHead, uAlpha, uTime, uLift;
-varying vec2 vUv;
-void main() {
-  float r = length(vUv - 0.5) * 2.0;
-  float glow = exp(-r * r * 6.0) + 0.6 * exp(-r * r * 40.0);
-  float flicker = 0.88 + 0.12 * sin(uTime * 23.0) * sin(uTime * 7.3);
-  float end = 1.0 - 0.6 * smoothstep(0.995, 1.0, uHead);
-  gl_FragColor = vec4(vec3(0.6, 0.85, 1.0) * 6.0, glow * flicker * end * uAlpha * (1.0 - 0.55 * uLift) * (1.0 - smoothstep(0.9, 1.0, r)));
-}`;
-const uvVert = /* glsl */ `
-varying vec2 vUv;
-void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+function nodeMaterial(u: PathU) {
+  const vL = attribute<"vec2">("aL", "vec2");
+  const vS = attribute<"float">("aS", "float");
+  const r = length(vL);
+  const aa = max(fwidth(r), 0.0005);
+  const band = (a: F, b: F) =>
+    smoothstep(a.sub(aa), a, r).mul(smoothstep(b, aa.add(b), r).oneMinus());
+  // Expanding ring as a front (the pulse head, or the recap wave) passes this node.
+  const flash = (h: F) => {
+    const f = clamp(h.sub(vS).div(0.08), 0, 1);
+    const fr = mix(0.012, 0.048, f);
+    return smoothstep(vS.sub(0.002), vS, h).mul(f.oneMinus()).mul(band(fr.sub(0.003), fr));
+  };
+  const lit = smoothstep(vS.sub(0.002), vS, u.uHead);
+  const shape = band(float(0.008), float(0.012)).add(smoothstep(0.004, aa.add(0.004), r).oneMinus());
+  const fl = flash(u.uHead).add(flash(u.uRecap));
+  const m = new THREE.MeshBasicNodeMaterial(GLOW);
+  m.colorNode = BLUE().mul(shape.mul(mix(0.6, 3.5, lit)).add(fl.mul(5)));
+  m.opacityNode = shape.mul(mix(0.25, 1, lit)).add(fl).mul(u.uAlpha).mul(u.uLift.oneMinus());
+  return m;
+}
+
+function headMaterial(u: PathU) {
+  const r = length(uv().sub(0.5)).mul(2);
+  const r2 = r.mul(r);
+  const glow = exp(r2.mul(-6)).add(exp(r2.mul(-40)).mul(0.6));
+  const flicker = sin(u.uTime.mul(23)).mul(sin(u.uTime.mul(7.3))).mul(0.12).add(0.88);
+  const end = smoothstep(0.995, 1, u.uHead).mul(0.6).oneMinus();
+  const m = new THREE.MeshBasicNodeMaterial(GLOW);
+  m.colorNode = vec3(0.6, 0.85, 1.0).mul(6);
+  m.opacityNode = glow
+    .mul(flicker)
+    .mul(end)
+    .mul(u.uAlpha)
+    .mul(u.uLift.mul(0.55).oneMinus())
+    .mul(smoothstep(0.9, 1, r).oneMinus());
+  return m;
+}
 
 export function PathTrace({ u }: { u: PathU }) {
   const head = useRef<THREE.Mesh>(null);
@@ -188,9 +180,9 @@ export function PathTrace({ u }: { u: PathU }) {
       ribbon: buildRibbon(),
       nodes: buildNodes(),
       sprite: new THREE.PlaneGeometry(0.06, 0.06),
-      ribbonMat: new THREE.ShaderMaterial({ vertexShader: ribbonVert, fragmentShader: ribbonFrag, uniforms: u, ...GLOW }),
-      nodeMat: new THREE.ShaderMaterial({ vertexShader: nodeVert, fragmentShader: nodeFrag, uniforms: u, ...GLOW }),
-      headMat: new THREE.ShaderMaterial({ vertexShader: uvVert, fragmentShader: headFrag, uniforms: u, ...GLOW }),
+      ribbonMat: ribbonMaterial(u),
+      nodeMat: nodeMaterial(u),
+      headMat: headMaterial(u),
     }),
     [u],
   );
