@@ -13,11 +13,16 @@ export const credits = {
   present: "تقدیم می‌کنند",
 };
 
+/** The partners on one line. */
+export const issuersLine = credits.issuers.join(" · ");
+
 /** First words of the film, risen at the end of the autoplayed intro. */
 export const hook = { at: 3.3, out: 7.2, title: "انتخاب شده‌اید، چون متفاوتید." };
 
 /** Captions that rise out of the dark at sequence times `at` → `out` (seconds). */
-export const captions: { at: number; out: number; title: string; body?: string }[] = [
+export type Caption = { at: number; out: number; title: string; body?: string };
+
+export const captions: Caption[] = [
   {
     at: 11.4,
     out: 14.0,
@@ -38,6 +43,9 @@ export const captions: { at: number; out: number; title: string; body?: string }
   },
   { at: 34.4, out: 36.6, title: "ارزش پژوهش‌یار، در درهایی است که می‌تواند به روی شما باز کند." },
 ];
+
+/** Every caption in film order: the hook, then the scrubbed captions. */
+export const allCaptions: Caption[] = [hook, ...captions];
 
 /** The seven stages of the path, in STAGES order (path.ts). */
 export const stages = [
@@ -60,6 +68,16 @@ export const finale = {
   cta: "ورود به مسیر پژوهش‌یار",
   ctaHref: "#", // DRAFT: real destination undecided. The card is issued only to Daneshmand's selected people, never "request card".
   hint: "کارت را بکشید تا بچرخد · نگه دارید تا مدارش روشن شود",
+};
+
+/** The film's own interface: labels, cues and the screen-reader title. */
+export const ui = {
+  pageTitle: "پژوهش‌یار؛ کارت مؤسسه تحقیق و توسعه دانشمند، بانک سینا و گرین‌بانک",
+  scrollCue: "برای دیدن، اسکرول کنید",
+  loading: "در حال آماده‌سازی",
+  request: "ورود به مسیر",
+  rail: "صحنه‌های فیلم",
+  sound: "صدا",
 };
 
 /** The film rail: where each act begins. */
