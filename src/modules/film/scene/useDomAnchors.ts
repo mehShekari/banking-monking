@@ -77,7 +77,8 @@ export function useDomAnchors(rig: Rig) {
     const { portrait, formCycle } = live;
     anchors.current.form.forEach((el, side) => {
       const off = portrait ? FORM_OFFSETS.portrait : FORM_OFFSETS.sides[side];
-      const on = form * (portrait && side === 1 ? 0 : 1);
+      // The caption names a shape: it arrives once the particles have nearly assembled.
+      const on = smooth(0.75, 1, form) * (portrait && side === 1 ? 0 : 1);
       if (on < 0.01 || !card) {
         el.style.opacity = "0";
         return;

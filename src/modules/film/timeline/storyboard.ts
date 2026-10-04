@@ -80,8 +80,10 @@ const base: Tracks = {
   },
   Final: {
     interact: [[0, 0], [37.2, 0], [38, 1], [40, 1]],
-    // The particle stations stream out of the card and assemble beside it.
-    form: [[0, 0], [37.8, 0], [39.0, 1], [40, 1]],
+    // The particle stations stream out of the card and assemble beside it. They start as the
+    // camera clears the last door, while the card is still edge-on and turning to face us
+    // (film 40.6 → 42.4), so the doors hand straight over to the finale instead of an empty beat.
+    form: [[0, 0], [35.8, 0], [37.6, 1], [40, 1]],
   },
   Atmos: {
     dust: [[0, 0], [0.4, 0], [2.6, 0.6], [8.2, 1], [29.2, 1], [35.6, 0.7], [40, 0.4]],
