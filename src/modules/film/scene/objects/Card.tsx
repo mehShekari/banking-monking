@@ -42,8 +42,8 @@ import {
   diffuseColor,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
-import { SDF_SPREAD } from "./sdf";
-import { makeCardU, makeNetworkU, type CardU, type NetworkU } from "./tsl";
+import { SDF_SPREAD } from "@/modules/film/scene/sdf";
+import { makeCardU, makeNetworkU, type CardU, type NetworkU } from "@/modules/film/scene/tsl";
 
 export const CARD_W = 1;
 export const CARD_H = 2868 / 1764;

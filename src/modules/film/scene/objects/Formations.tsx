@@ -38,7 +38,7 @@ import {
 } from "three/tsl";
 import { CARD_H, CARD_W, FACE_Z } from "./Card";
 import { useStationsGLTF } from "./Stations";
-import { bokehAlpha, bokehScale, coc, type FormU, quality } from "./tsl";
+import { bokehAlpha, bokehScale, coc, type FormU, quality } from "@/modules/film/scene/tsl";
 
 const STATIONS = 7;
 

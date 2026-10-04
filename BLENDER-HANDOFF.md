@@ -14,7 +14,7 @@ The emblems read too close to the card (navy on navy). The site now separates th
 | Depth | flat | a soft contact shadow on the card under each emblem (code) |
 | Colour | navy, blue circuit | blue only on the `Glow` parts |
 
-The materials are replaced in code (`app/film/Stations.tsx`, `LOOK`):
+The materials are replaced in code (`src/modules/film/scene/objects/Stations.tsx`, `LOOK`):
 
 | Material | Base colour | Metallic | Roughness |
 | --- | --- | --- | --- |

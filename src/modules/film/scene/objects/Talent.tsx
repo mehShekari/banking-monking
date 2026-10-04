@@ -31,9 +31,9 @@ import {
   vec4,
 } from "three/tsl";
 import { CARD_H } from "./Card";
-import { bokehAlpha, bokehScale, coc, motion, streakSize, type TalentU } from "./tsl";
+import { bokehAlpha, bokehScale, coc, motion, streakSize, type TalentU } from "@/modules/film/scene/tsl";
 
-export type { TalentU } from "./tsl";
+export type { TalentU } from "@/modules/film/scene/tsl";
 
 const COUNT = 12000;
 // The field held 2500 points; keep its density feel at the higher count.

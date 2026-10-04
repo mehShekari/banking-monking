@@ -37,7 +37,7 @@ import {
   vec4,
 } from "three/tsl";
 import { CARD_H, CARD_TEXTURES, CARD_W, FACE_Z, FRONT_BOX, RADIUS, readPixels, roundedRect } from "./Card";
-import { bokehAlpha, bokehScale, coc, type EmergeU, quality } from "./tsl";
+import { bokehAlpha, bokehScale, coc, type EmergeU, quality } from "@/modules/film/scene/tsl";
 
 const SW = 220;
 const SH = 358;

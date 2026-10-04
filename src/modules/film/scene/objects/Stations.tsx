@@ -28,9 +28,9 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { KTX2Loader } from "three/examples/jsm/loaders/KTX2Loader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { FACE_Z } from "./Card";
-import { clock } from "./clock";
-import { STAGES, pointAt, stageTime } from "./path";
-import type { PathU } from "./tsl";
+import { clock } from "@/modules/film/timeline/clock";
+import { STAGES, pointAt, stageTime } from "@/modules/film/timeline/path";
+import type { PathU } from "@/modules/film/scene/tsl";
 
 let ktx2: KTX2Loader | null = null;
 

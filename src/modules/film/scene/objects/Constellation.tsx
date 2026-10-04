@@ -25,9 +25,9 @@ import {
   vec3,
 } from "three/tsl";
 import { FACE_Z } from "./Card";
-import { STAGES } from "./path";
+import { STAGES } from "@/modules/film/timeline/path";
 import { GLOW } from "./PathTrace";
-import type { PathU } from "./tsl";
+import type { PathU } from "@/modules/film/scene/tsl";
 
 type F = THREE.Node<"float">;
 type V3 = THREE.Node<"vec3">;

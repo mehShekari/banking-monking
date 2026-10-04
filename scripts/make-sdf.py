@@ -8,7 +8,7 @@ so the shader can draw crisp traces and letters at any zoom.
 
 Reads  public/images/final app front.png   (1764x2868, the card artwork)
 Writes public/images/name-sdf.png       (8-bit, artwork size)
-       app/film/sdf.ts                      (the spread, so the shader decodes distance exactly)
+       src/modules/film/scene/sdf.ts                      (the spread, so the shader decodes distance exactly)
 
 Encoding: v = 0.5 - d / (2 * SPREAD), d in artwork pixels, positive outside the shape.
 """
@@ -96,7 +96,7 @@ def main():
     # low-contrast, and raster extraction breaks traces into dashes (circuit_mask is kept for
     # when a vector source of the circuit arrives; render it to a mask and feed it to sdf()).
     sdf(name_mask(a), 0.5, w, h).save("public/images/name-sdf.png", optimize=True)
-    with open("app/film/sdf.ts", "w", encoding="utf8") as f:
+    with open("src/modules/film/scene/sdf.ts", "w", encoding="utf8") as f:
         f.write(
             "// Written by scripts/make-sdf.py. The distance fields' encoding:\n"
             "//   v = 0.5 - d / (2 * SDF_SPREAD), d in artwork px, positive outside the shape.\n"

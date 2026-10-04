@@ -5,15 +5,15 @@ import gsap from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import dynamic from "next/dynamic";
 import { Fragment, useRef, useState } from "react";
-import { clock } from "./clock";
-import { captions, credits, doors, endCredits, finale, hook, shots, stages } from "./copy";
-import { STAGES, stageTime } from "./path";
-import { sound } from "./sound";
-import { INTRO_END, LENGTH } from "./storyboard";
+import { clock } from "@/modules/film/timeline/clock";
+import { captions, credits, doors, endCredits, finale, hook, shots, stages } from "@/modules/film/constants/copy";
+import { STAGES, stageTime } from "@/modules/film/timeline/path";
+import { sound } from "@/modules/film/audio/sound";
+import { INTRO_END, LENGTH } from "@/modules/film/timeline/storyboard";
 
 gsap.registerPlugin(ScrollTrigger, useGSAP);
 
-const Scene = dynamic(() => import("./Scene"), { ssr: false });
+const Scene = dynamic(() => import("@/modules/film/scene/FilmCanvas"), { ssr: false });
 
 // The hook rises at the end of the autoplayed intro, then the scrubbed captions.
 const allCaptions: { at: number; out: number; title: string; body?: string }[] = [hook, ...captions];
@@ -40,7 +40,7 @@ function Gateway() {
   );
 }
 
-export default function CardFilm() {
+export function FilmPage() {
   const root = useRef<HTMLElement>(null);
   const trigger = useRef<ScrollTrigger | null>(null);
   const [ready, setReady] = useState(false);

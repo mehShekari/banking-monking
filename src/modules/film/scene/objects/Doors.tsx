@@ -8,8 +8,8 @@ import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import { abs, fract, max, positionView, pow, smoothstep, texture, uniform, uv, vec3 } from "three/tsl";
 import { CARD_H } from "./Card";
-import { DOORS_Z } from "./storyboard";
-import type { DoorsU } from "./tsl";
+import { DOORS_Z } from "@/modules/film/timeline/storyboard";
+import type { DoorsU } from "@/modules/film/scene/tsl";
 
 export const DOOR_W = 2.4;
 export const DOOR_H = DOOR_W * CARD_H;

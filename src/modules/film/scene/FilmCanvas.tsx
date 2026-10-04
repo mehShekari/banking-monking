@@ -32,20 +32,20 @@ import {
 import { bloom } from "three/examples/jsm/tsl/display/BloomNode.js";
 import { smaa } from "three/examples/jsm/tsl/display/SMAANode.js";
 import { RectAreaLightTexturesLib } from "three/examples/jsm/lights/RectAreaLightTexturesLib.js";
-import { CARD_H, CARD_W, Card, FACE_Z, createRig } from "./Card";
-import { clock } from "./clock";
-import { Constellation } from "./Constellation";
-import { finale, stages } from "./copy";
-import { DOOR_H, Doors } from "./Doors";
-import { Emergence } from "./Emergence";
-import { Talent } from "./Intro";
-import { PathTrace } from "./PathTrace";
-import { STAGES, pointAt, stageTime } from "./path";
-import { sound } from "./sound";
-import { DOORS_Z, INTRO_END, LENGTH, buildState, defaults } from "./storyboard";
-import { FORM_OFFSETS, Formations, formStage } from "./Formations";
-import { EMBLEM_R, Stations } from "./Stations";
-import exported from "./film-state.json";
+import { CARD_H, CARD_W, Card, FACE_Z, createRig } from "@/modules/film/scene/objects/Card";
+import { clock } from "@/modules/film/timeline/clock";
+import { Constellation } from "@/modules/film/scene/objects/Constellation";
+import { finale, stages } from "@/modules/film/constants/copy";
+import { DOOR_H, Doors } from "@/modules/film/scene/objects/Doors";
+import { Emergence } from "@/modules/film/scene/objects/Emergence";
+import { Talent } from "@/modules/film/scene/objects/Talent";
+import { PathTrace } from "@/modules/film/scene/objects/PathTrace";
+import { STAGES, pointAt, stageTime } from "@/modules/film/timeline/path";
+import { sound } from "@/modules/film/audio/sound";
+import { DOORS_Z, INTRO_END, LENGTH, buildState, defaults } from "@/modules/film/timeline/storyboard";
+import { FORM_OFFSETS, Formations, formStage } from "@/modules/film/scene/objects/Formations";
+import { EMBLEM_R, Stations } from "@/modules/film/scene/objects/Stations";
+import exported from "@/modules/film/timeline/film-state.json";
 import { bokehAlpha, bokehScale, coc, lens, makeDoorsU, makeEmergeU, makeFormU, makePathU, makeTalentU, motion, streakSize, quality } from "./tsl";
 
 // Node materials (and the rest of three/webgpu) as JSX elements.

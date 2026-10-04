@@ -24,10 +24,10 @@ import {
   vec3,
 } from "three/tsl";
 import { FACE_Z } from "./Card";
-import { PATH, PATH_S, STAGES, pointAt } from "./path";
-import type { PathU } from "./tsl";
+import { PATH, PATH_S, STAGES, pointAt } from "@/modules/film/timeline/path";
+import type { PathU } from "@/modules/film/scene/tsl";
 
-export type { PathU } from "./tsl";
+export type { PathU } from "@/modules/film/scene/tsl";
 
 type F = THREE.Node<"float">;
 

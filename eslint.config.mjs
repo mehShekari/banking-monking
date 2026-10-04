@@ -18,7 +18,7 @@ const eslintConfig = defineConfig([
   {
     // The 3D film mutates Three objects every frame by design (R3F's useFrame model);
     // the React Compiler purity rules don't apply to that imperative layer.
-    files: ["app/film/**"],
+    files: ["src/modules/film/scene/**"],
     rules: {
       "react-hooks/immutability": "off",
       "react-hooks/purity": "off",
