@@ -307,7 +307,8 @@ function Film({ onReady }: { onReady: () => void }) {
   const hands = useRef({ spin: 0, vel: 0, idle: 0, charge: 0, burst: -1 });
   const interact = useRef(0);
   const ctaHover = useRef(false);
-  const hover = useRef(0);
+  /** The CTA's answer: one light wave along the card's path, 0…1 while it runs, -1 at rest. */
+  const wave = useRef({ t: -1, was: false });
 
   useStudioEnvironment();
 
@@ -365,7 +366,7 @@ function Film({ onReady }: { onReady: () => void }) {
       if (e.pointerType === "touch") p.active = false;
     };
     const leave = () => (p.active = false);
-    const over = (e: PointerEvent) => (ctaHover.current = !!(e.target as Element).closest?.(".finale .cta"));
+    const over = (e: PointerEvent) => (ctaHover.current = !!(e.target as Element).closest?.(".cta"));
     window.addEventListener("pointermove", move, { passive: true });
     window.addEventListener("pointerdown", down);
     window.addEventListener("pointerover", over);
@@ -568,9 +569,7 @@ function Film({ onReady }: { onReady: () => void }) {
     }
     rig.uniforms.uSweep.value = L.sweep;
     rig.uniforms.uSweepAngle.value = L.sweepAngle;
-    // Hovering the CTA gathers the card's network around it (after igloo.inc's link particles).
-    hover.current += ((ctaHover.current ? 0.75 : 0) - hover.current) * Math.min(1, dt * 3);
-    rig.network.uMix.value = Math.max(burstMix, hover.current * F.interact);
+    rig.network.uMix.value = burstMix; // the network is the burst's; a hover is answered by the path
     // Scroll speed: smoothed for the particle streaks and a faint colour split. No full-frame trail:
     // smearing the card while it moves read as blur.
     const pv = prev.current;
@@ -599,6 +598,21 @@ function Film({ onReady }: { onReady: () => void }) {
     live.path.uAlpha.value = P.alpha;
     live.path.uTime.value = t;
     live.path.uRecap.value = P.recap;
+    // Hovering the gateway: the path answers with one wave, start to «اثر», each node flashing as
+    // it passes (and pinging, if sound is on). Edge-triggered; a run always finishes.
+    const wv = wave.current;
+    if (ctaHover.current && !wv.was && F.interact > 0.5 && wv.t < 0) wv.t = 0;
+    wv.was = ctaHover.current;
+    if (wv.t >= 0) {
+      const from = wv.t;
+      wv.t = Math.min(1, wv.t + dt / 1.1);
+      const ease = (x: number) => x * x * (3 - 2 * x);
+      const s0 = THREE.MathUtils.lerp(-0.2, 1.2, ease(from));
+      const s1 = THREE.MathUtils.lerp(-0.2, 1.2, ease(wv.t));
+      STAGES.forEach((st, k) => st.s > s0 && st.s <= s1 && sound.node(k));
+      live.path.uRecap.value = s1;
+      if (wv.t >= 1) wv.t = -1;
+    }
     live.path.uLift.value = P.lift;
     // Staged funding: while the pulse rests on stage k, the road to k+1 is pre-lit.
     let ahead = 0;

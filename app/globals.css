@@ -317,13 +317,19 @@ body {
   color: var(--ink-dim);
 }
 
+/* The gateway. A porcelain object lit by the pointer, in the stations' language. GSAP drives
+   --rim, --lit, --go (0…1, one timeline per button) and --x, --y (%), --a (deg) from the pointer. */
 .cta {
+  --rim: 0;
+  --lit: 0;
+  --go: 0;
+  --x: 50;
+  --y: 30;
+  --a: 315;
   position: relative;
   display: inline-block;
-  overflow: hidden;
   padding: 1rem 2.6rem;
   border-radius: 12px;
-  background: var(--ink);
   color: var(--void);
   font-family: var(--font-display);
   font-weight: 600;
@@ -331,21 +337,62 @@ body {
   text-decoration: none;
   text-shadow: none;
   pointer-events: auto;
-  box-shadow: 0 10px 40px -12px rgb(124 196 255 / 0.55);
-  transition: box-shadow 0.5s var(--ease-out), translate 0.5s var(--ease-out);
+  transform-style: preserve-3d;
+  /* A soft highlight where the pointer is, over a face that cools toward the signal at its foot. */
+  background:
+    radial-gradient(90% 140% at calc(var(--x) * 1%) calc(var(--y) * 1%), rgb(255 255 255 / calc(var(--lit) * 0.95)), transparent 60%),
+    linear-gradient(180deg, var(--ink) 40%, color-mix(in oklab, var(--ink), var(--signal) calc(var(--lit) * 28%)));
+  /* The glow tightens and drops under the button as it lights: depth, not a halo. */
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.7),
+    0 calc(10px + var(--lit) * 8px) calc(40px - var(--lit) * 12px) calc(-12px - var(--lit) * 2px) rgb(124 196 255 / calc(0.55 + var(--lit) * 0.3));
+  transition: scale 0.18s var(--ease-out);
 }
-/* The same light sweep that crosses the card, crossing the button. */
-.cta::after {
+/* The rim: a thin conic light just outside the edge, its bright arc facing the pointer. Off the
+   face, against the night, so it reads; a light line on the porcelain itself would vanish. */
+.cta::before {
   content: "";
   position: absolute;
-  inset: 0;
-  background: linear-gradient(105deg, transparent 35%, rgb(124 196 255 / 0.55) 50%, transparent 65%);
-  translate: 110% 0;
-  transition: translate 0.9s var(--ease-out);
+  inset: -5px;
+  padding: 1.5px;
+  border-radius: 17px;
+  background: conic-gradient(
+    from calc(var(--a) * 1deg - 70deg),
+    transparent,
+    rgb(124 196 255 / 0.9) 45deg,
+    #fff 70deg,
+    rgb(124 196 255 / 0.9) 95deg,
+    transparent 140deg
+  );
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+  opacity: var(--rim);
+  pointer-events: none;
 }
-.cta:hover { translate: 0 -2px; box-shadow: 0 16px 50px -12px rgb(124 196 255 / 0.75); }
-.cta:hover::after { translate: -110% 0; }
-.cta:active { translate: 0 0; }
+.cta-label {
+  display: inline-block;
+  /* Raised off the face; the arrow carries the forward motion. */
+  transform: translateZ(14px);
+}
+.cta-arrow {
+  position: absolute;
+  inset-inline-end: 0.7rem;
+  top: 50%;
+  width: 1rem;
+  height: 0.6rem;
+  margin-top: -0.3rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: calc(1 - var(--go));
+  opacity: min(1, calc(var(--go) * 2));
+  transform: translateZ(14px) translateX(calc((1 - var(--go)) * 0.5rem));
+}
+.cta:active { scale: 0.97; }
+.cta:active::before { filter: brightness(1.5); }
+.cta:focus-visible { outline: 2px solid var(--signal); outline-offset: 5px; }
 
 .request {
   position: fixed;
@@ -579,7 +626,6 @@ body {
   .loading,
   .cue-line { animation: none; opacity: 0.6; }
   .cta,
-  .cta::after,
   .sound svg,
   .sound .wave { transition: none; }
 }
