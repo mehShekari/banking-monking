@@ -23,7 +23,7 @@ const sheet = getProject("Pazhoohesh-Yar Film", { state }).sheet(SHEET);
 const RANGES: Record<string, Record<string, [number, number]>> = {
   Camera: {
     fDist: [0.2, 3], fYaw: [-1.6, 1.6], fPitch: [-1.3, 1.3], fLead: [-0.1, 0.15], fRoll: [-0.4, 0.4],
-    fov: [12, 60], follow: [0, 1], frame: [0, 1], roll: [-0.4, 0.4],
+    fov: [12, 60], follow: [0, 1], frame: [0, 1], side: [0, 1], roll: [-0.4, 0.4],
   },
 };
 

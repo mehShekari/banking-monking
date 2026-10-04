@@ -42,7 +42,11 @@ const base: Tracks = {
     tz: [[0, 0], [29.2, 0], [35.6, END_Z], [40, END_Z]],
     fov: [[0, 30], [11.8, 30], [12.8, 24], [26.6, 24], [27.6, 32], [29.2, 34], [32, 42], [35.6, 31], [40, 31]],
     roll: [[0, 0], [29.2, 0], [31.4, 0.06], [33.4, -0.05], [35.6, 0], [40, 0]],
+    // Caption beats make room for the words: `frame` lifts the card on portrait screens,
+    // `side` slides it aside on desktop. Desktop keeps the card centred through the intro
+    // (the blade is thin; the hook sits clear of it), so the arrival happens on the axis.
     frame: [[0, 0], [3.2, 0], [3.8, 0.7], [5.6, 0.7], [6.6, 0], [8.4, 0], [9, 1], [11.2, 1], [11.8, 0], [26.4, 0], [27, 0.8], [28.4, 0.8], [29.2, 0], [40, 0]],
+    side: [[0, 0], [8.4, 0], [9, 1], [11.2, 1], [11.8, 0], [26.4, 0], [27, 0.8], [28.4, 0.8], [29.2, 0], [40, 0]],
     follow: [[0, 0], [11.8, 0], [12.7, 1], [26.4, 1], [27.6, 0], [40, 0]],
   },
   Card: {
@@ -74,6 +78,8 @@ const base: Tracks = {
   Intro: {
     talent: [[0, 0], [0.3, 0], [1.5, 1], [2.2, 1], [3.3, 0.22], [4.2, 0.15], [8.2, 0.05], [37.2, 0.05], [38.6, 0.3], [40, 0.3]],
     chosen: [[0, 0], [1.6, 0], [2.1, 0.3], [3.0, 0.8], [3.6, 1], [40, 1]],
+    // The arrival shockwave through the talent field, as the blade becomes the card.
+    pulse: [[0, 0], [3.05, 0], [4.2, 1], [40, 1]],
   },
   Doors: {
     alpha: [[0, 0], [27.6, 0], [28.8, 1], [40, 1]],
@@ -91,7 +97,8 @@ const base: Tracks = {
     bloom: [[0, 0.6], [3.5, 0.85], [8.2, 0.5], [12.8, 0.55], [26.6, 0.7], [29.2, 0.5], [35.6, 0.5], [37.4, 0.5], [40, 0.5]],
     exposure: [[0, 1], [40, 1]],
     // Act transitions: short chromatic/displacement pulses where one act hands over to the next.
-    shift: [[0, 0], [3.35, 0], [3.55, 0.55], [3.85, 0], [11.7, 0], [12.0, 0.6], [12.4, 0], [28.0, 0], [28.35, 1], [28.8, 0], [35.5, 0], [35.8, 0.7], [36.2, 0], [40, 0]],
+    // No glitch on the arrival: the field's shockwave carries that beat.
+    shift: [[0, 0], [11.7, 0], [12.0, 0.6], [12.4, 0], [28.0, 0], [28.35, 1], [28.8, 0], [35.5, 0], [35.8, 0.7], [36.2, 0], [40, 0]],
     // Depth of field (aperture scale): shallow on the macro path, off while the doors fly by.
     dof: [[0, 0.4], [4.2, 0.4], [8.2, 0.5], [12.8, 0.55], [26.6, 0.55], [27.6, 0.4], [28.6, 0], [35.6, 0], [37.4, 0.2], [40, 0.2]],
   },

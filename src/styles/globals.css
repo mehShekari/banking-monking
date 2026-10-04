@@ -111,11 +111,13 @@ body {
   opacity: 0;
 }
 
+/* The lower third: the centre belongs to the light the names are bringing. */
 .credits {
   position: fixed;
   inset: 0;
   display: grid;
-  place-items: center;
+  place-items: end center;
+  padding-block-end: 22vh;
   z-index: 6;
   pointer-events: none;
 }

@@ -28,7 +28,7 @@ import { Emergence } from "./objects/Emergence";
 import { Formations } from "./objects/Formations";
 import { Path } from "./objects/Path";
 import { StudioLights } from "./objects/StudioLights";
-import { Talent } from "./objects/Talent";
+import { Talent, bladeAt } from "./objects/Talent";
 
 export function Film({ onReady }: { onReady: () => void }) {
   const three = useThree();
@@ -83,12 +83,16 @@ export function Film({ onReady }: { onReady: () => void }) {
     const charge = live.hands.charge;
     gl.domElement.style.cursor = F.interact > 0.5 ? (p.down && p.moved ? "grabbing" : "grab") : "";
 
-    // The card: keyed, with a slow float, the visitor's spin, and a swell as it charges.
+    // The card: keyed, with a slow float, the visitor's spin, and a swell as it charges. It
+    // arrives along the blade of light (Talent's bladeAt): the light stretches into its edge
+    // and the card grows with it, so it emerges instead of popping into the frame.
     if (card) {
-      card.visible = clock.t >= 2.85;
+      const arrive = bladeAt(values("Intro").chosen);
+      const swell = 1 + charge * 0.02;
+      card.visible = arrive > 0.001;
       card.position.set(K.x, K.y + Math.sin(live.t * 0.6) * 0.012, K.z);
       card.rotation.set(K.rx, K.ry + live.hands.spin, K.rz);
-      card.scale.setScalar(1 + charge * 0.02);
+      card.scale.set(swell, swell * Math.max(arrive, 1e-3), swell);
       card.updateMatrixWorld();
     }
 
@@ -112,7 +116,7 @@ export function Film({ onReady }: { onReady: () => void }) {
     const back = live.portrait ? 1 + (0.8 - aspect) * 1.1 : 1;
     tmp.pos.sub(tmp.target).multiplyScalar(back).add(tmp.target);
     // Caption beats: slide the card aside (desktop) or up (portrait) to give the words room.
-    const fx = live.portrait ? 0 : 0.62 * C.frame;
+    const fx = live.portrait ? 0 : 0.62 * C.side;
     const fy = live.portrait ? -0.42 * C.frame : 0;
     tmp.target.x += fx;
     tmp.target.y += fy;

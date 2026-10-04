@@ -1,8 +1,9 @@
 "use client";
 
-// Act one, "Chosen": a field of faint talent; one point is selected, travels to
-// the centre and stretches into the blade of light that is the card's edge. Above
-// it, the three partners descend as one braid of light and cinch into the point.
+// Act one, "Chosen": a field of faint talent; one point is selected, travels to where the
+// card will be and stretches into the blade of light that becomes the card's edge (the card
+// grows along it: see bladeAt). Above it, the three partners descend as one braid of light
+// and cinch into the point. As the card arrives, a shockwave runs out through the field.
 // In the finale the field returns around the card and gathers to the visitor's pointer.
 
 import { useFrame, useThree } from "@react-three/fiber";
@@ -52,12 +53,21 @@ const TAU = Math.PI * 2;
 
 const easeInOut = (k: number) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
 
-/** Where the chosen point is, and how bright, at choreography value c. */
-function chosenAt(c: number, out: THREE.Vector3) {
+/** Where the chosen point is at choreography value c: it lands on the card (`target`). */
+function chosenAt(c: number, target: THREE.Vector3, out: THREE.Vector3) {
   if (c <= 0.3) return out.copy(START);
-  if (c <= 0.8) return out.lerpVectors(START, new THREE.Vector3(), easeInOut((c - 0.3) / 0.5));
-  return out.set(0, 0, 0);
+  if (c <= 0.8) return out.lerpVectors(START, target, easeInOut((c - 0.3) / 0.5));
+  return out.copy(target);
 }
+
+/**
+ * How far the landed point has stretched into the blade, 0…1 (c 0.8 → 1). The card grows
+ * along the same stretch, so the light becomes its edge instead of the card appearing.
+ */
+export const bladeAt = (c: number) => (c > 0.8 ? easeInOut(Math.min(1, (c - 0.8) / 0.2)) : 0);
+
+/** The arrival shockwave: how far its ring has run out through the field (world units). */
+const RING_REACH = 7;
 
 const inst1 = (a: Float32Array) => instancedBufferAttribute<"float">(new THREE.InstancedBufferAttribute(a, 1), "float");
 const inst3 = (a: Float32Array) => instancedBufferAttribute<"vec3">(new THREE.InstancedBufferAttribute(a, 3), "vec3");
@@ -79,6 +89,7 @@ export function Talent() {
     const uPx = uniform(0);
     const uChosenOn = uniform(0);
     const uChosenPos = uniform(new THREE.Vector3());
+    const uPulse = uniform(0);
 
     // ── Field ──
     const p0 = new Float32Array(COUNT * 3);
@@ -88,9 +99,17 @@ export function Talent() {
       seeds[i] = Math.random();
     }
     const seed = inst1(seeds);
-    const drift = inst3(p0).add(
+    const still = inst3(p0).add(
       vec3(sin(u.uTime.mul(0.07).add(seed.mul(40))).mul(0.2), cos(u.uTime.mul(0.05).add(seed.mul(31))).mul(0.15), u.uFieldZ),
     );
+    // The card's arrival: a ring runs out from it across the frame (measured in the screen
+    // plane, so it reads as a ring, not a scattered shell), pushing the talent aside and
+    // lighting it as it passes; then the field settles back.
+    const fromCard = vec3(still.x.sub(uChosenPos.x), still.y.sub(uChosenPos.y), 0);
+    const reach = length(fromCard);
+    const front = reach.sub(uPulse.mul(RING_REACH)).div(0.55);
+    const ring = exp(front.mul(front).negate()).mul(uPulse.oneMinus()).mul(smoothstep(0, 0.04, uPulse));
+    const drift = still.add(fromCard.div(reach.add(1e-3)).mul(ring.mul(0.9)));
     // The visitor's pointer: nearby talent drifts toward it, circling a little.
     const rel = drift.sub(u.uCursor);
     const pull = u.uCursorOn.mul(exp(dot(rel, rel).div(-0.5)));
@@ -100,10 +119,11 @@ export function Talent() {
     const d = distance(fieldPos, uChosenPos);
     const near = exp(d.mul(d).div(-1.44)).mul(uChosenOn).mul(2).add(1);
     const fieldC = varying(coc(fieldDepth));
-    const fieldSize = seed.mul(1.8).add(0.8).mul(26).mul(uPx).mul(near.mul(0.2).add(0.8)).mul(bokehScale(fieldC));
+    const fieldSize = seed.mul(1.8).add(0.8).mul(26).mul(uPx).mul(near.mul(0.2).add(0.8)).mul(bokehScale(fieldC)).mul(ring.mul(0.8).add(1));
     const twinkle = sin(u.uTime.mul(seed.add(0.6)).mul(2).add(seed.mul(90))).mul(0.45).add(0.55);
     const fieldA = varying(
-      seed.mul(0.35).add(0.15).mul(twinkle).mul(near).mul(u.uTalent).mul(pull.mul(2.5).add(1)).mul(DENSITY),
+      // The ring lights talent on its own: the field is at its dimmest when the card arrives.
+      seed.mul(0.35).add(0.15).mul(twinkle).mul(near).mul(u.uTalent.add(ring.mul(1.3))).mul(pull.mul(2.5).add(1)).mul(DENSITY),
     );
     const fieldMat = new THREE.SpriteNodeMaterial(additive);
     fieldMat.positionNode = fieldPos;
@@ -193,6 +213,7 @@ export function Talent() {
       uPx,
       uChosenOn,
       uChosenPos,
+      uPulse,
       trailPos,
       trailA,
       fieldMat,
@@ -227,8 +248,13 @@ export function Talent() {
   );
 
   const tmp = useMemo(() => new THREE.Vector3(), []);
+  const target = useMemo(() => new THREE.Vector3(), []);
   useFrame((state) => {
     const I = values("Intro");
+    const K = values("Card");
+    // The point lands where the card is (it sits behind the origin), so blade and edge coincide.
+    target.set(K.x, K.y, K.z);
+    parts.uPulse.value = I.pulse;
     u.uTalent.value = I.talent;
     u.uChosen.value = I.chosen;
     u.uStreams.value = I.streams;
@@ -245,7 +271,7 @@ export function Talent() {
     const flying = c > 0.001 && c < 0.999;
     const bright = c <= 0.3 ? easeInOut(c / 0.3) : c <= 0.8 ? 1 : 1 - (c - 0.8) / 0.2;
 
-    chosenAt(c, tmp);
+    chosenAt(c, target, tmp);
     parts.uChosenPos.value.copy(tmp);
     parts.uChosenOn.value = flying ? bright : 0;
 
@@ -254,7 +280,7 @@ export function Talent() {
       h.visible = flying;
       h.position.copy(tmp);
       h.quaternion.copy(camera.quaternion);
-      const k = c > 0.8 ? easeInOut((c - 0.8) / 0.2) : 0;
+      const k = bladeAt(c);
       h.scale.set(THREE.MathUtils.lerp(HEAD, 0.025, k), THREE.MathUtils.lerp(HEAD, CARD_H, k), 1);
       parts.headGlow.bright.value = bright;
     }
@@ -281,7 +307,7 @@ export function Talent() {
     if (!trailOn) return;
     for (let j = 0; j < TRAIL; j++) {
       const cj = Math.max(0.3, c - (j + 1) * 0.008);
-      chosenAt(cj, tmp);
+      chosenAt(cj, target, tmp);
       parts.trailPos.setXYZ(j, tmp.x, tmp.y, tmp.z);
       parts.trailA.setX(j, (1 - j / TRAIL) * 0.6 * fade);
     }

@@ -134,6 +134,16 @@ export function useFilmTimeline(root: RefObject<HTMLElement | null>, ready: bool
         });
       };
 
+      // ?debug: seek the film to any time from DevTools (`__seek(3.3)`), for checking beats
+      // the autoplayed intro passes too quickly to inspect.
+      let intro: gsap.core.Tween | null = null;
+      if (window.location.search.includes("debug")) {
+        (window as unknown as { __seek?: (t: number) => void }).__seek = (t: number) => {
+          intro?.kill();
+          film.time(t);
+        };
+      }
+
       // The intro plays once on its own; any input fast-forwards it.
       // Reduced motion, or a restored scroll position, starts at the first frame the viewer controls.
       if (reduce || window.scrollY > 10) {
@@ -141,8 +151,8 @@ export function useFilmTimeline(root: RefObject<HTMLElement | null>, ready: bool
         takeOver();
       } else {
         document.documentElement.style.overflow = "hidden";
-        const intro = film.tweenTo(INTRO_END, { ease: "none", onComplete: takeOver });
-        const hurry = () => intro.timeScale(5);
+        intro = film.tweenTo(INTRO_END, { ease: "none", onComplete: takeOver });
+        const hurry = () => intro?.timeScale(5);
         const opts = { passive: true, once: true } as const;
         window.addEventListener("wheel", hurry, opts);
         window.addEventListener("touchstart", hurry, opts);
