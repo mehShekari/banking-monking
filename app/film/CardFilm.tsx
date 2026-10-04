@@ -88,7 +88,7 @@ export default function CardFilm() {
 
       // The path: each stage title is written by the pulse's light as it arrives,
       // then steps back (title only) when the next stage lights, and leaves after that.
-      // The last two leave before the achievement caption, all gone by 26.8.
+      // The last two leave before the achievement caption.
       const labels = q("[data-anchor^='stage'] .stage-label") as HTMLElement[];
       labels.forEach((el, k) => {
         const at = stageTime(k) - 0.15;
@@ -101,7 +101,7 @@ export default function CardFilm() {
             .to(el.querySelector("p"), { autoAlpha: 0, duration: 0.3 }, stageTime(k + 1) - 0.15);
         }
         if (k + 2 < labels.length) film.to(el, { autoAlpha: 0, duration: 0.4, ease: "power2.in" }, stageTime(k + 2) - 0.15);
-        else film.to(el, { autoAlpha: 0, duration: 0.4, ease: "power2.in" }, 26.4);
+        else film.to(el, { autoAlpha: 0, duration: 0.4, ease: "power2.in" }, stageTime(6) + 1.2);
       });
 
       film

@@ -14,29 +14,29 @@ export const credits = {
 };
 
 /** First words of the film, risen at the end of the autoplayed intro. */
-export const hook = { at: 3.3, out: 5.8, title: "انتخاب شده‌اید، چون متفاوتید." };
+export const hook = { at: 3.3, out: 7.2, title: "انتخاب شده‌اید، چون متفاوتید." };
 
 /** Captions that rise out of the dark at sequence times `at` → `out` (seconds). */
 export const captions: { at: number; out: number; title: string; body?: string }[] = [
   {
-    at: 8.8,
-    out: 11.4,
+    at: 11.4,
+    out: 14.0,
     title: "کارتی برای جامعهٔ منتخب دانشمند.",
     body: "برای دریافت جوایز، پژوهانه‌ها و گرنت‌های مؤسسه تحقیق و توسعه دانشمند؛ با بانک سینا و گرین‌بانک.",
   },
   {
-    at: 27.0,
-    out: 29.0,
+    at: 29.6,
+    out: 31.6,
     title: "دستاورد بیشتر می‌تواند جایگاه بالاتر بسازد.",
     body: "در پژوهش‌یار، پول بیشتر الزاماً جایگاه بالاتر نمی‌سازد.",
   },
   {
-    at: 29.2,
-    out: 31.2,
+    at: 31.8,
+    out: 33.8,
     title: "پژوهش‌یار برای همراهی با همین مسیر طراحی می‌شود.",
     body: "از دریافت اولین حمایت، تا ساختن اولین کسب‌وکار.",
   },
-  { at: 31.8, out: 34.0, title: "ارزش پژوهش‌یار، در درهایی است که می‌تواند به روی شما باز کند." },
+  { at: 34.4, out: 36.6, title: "ارزش پژوهش‌یار، در درهایی است که می‌تواند به روی شما باز کند." },
 ];
 
 /** The seven stages of the path, in STAGES order (path.ts). */
@@ -54,7 +54,7 @@ export const stages = [
 export const doors = ["فرصت پژوهش", "فرصت همکاری با صنعت", "فرصت تأمین مالی", "فرصت دیده‌شدن"];
 
 export const finale = {
-  at: 39.4,
+  at: 42.0,
   title: "از دانش، تا اثر.",
   sub: "پژوهش‌یار؛ امتیازِ انتخاب شدن.",
   cta: "ورود به مسیر پژوهش‌یار",
@@ -65,10 +65,10 @@ export const finale = {
 /** The film rail: where each act begins. */
 export const shots = [
   { at: 4.2, name: "ظهور" },
-  { at: 8.4, name: "پژوهش‌یار" },
-  { at: 11.8, name: "مسیر" },
-  { at: 29.8, name: "درها" },
-  { at: 37.8, name: "اثر" },
+  { at: 11.0, name: "پژوهش‌یار" },
+  { at: 14.4, name: "مسیر" },
+  { at: 32.4, name: "درها" },
+  { at: 40.4, name: "اثر" },
 ];
 
 /**

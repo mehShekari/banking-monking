@@ -42,8 +42,11 @@ export const PATH_S = PATH.map((_, i) => seg.slice(0, i).reduce((a, b) => a + b,
 /** Each stage node: its card-local position and arc fraction. */
 export const STAGES = RAW.flatMap((r, i) => (r.stage === undefined ? [] : [{ pos: PATH[i], s: PATH_S[i] }]));
 
-/** Sequence timing: the pulse rests on each node, then travels to the next. */
-export const PATH_START = 12;
+/** The emergence hold: 2.6 s opened at 4.2 so the card is born from light over ~6 s. */
+export const EMERGE_HOLD = 2.6;
+
+/** Sequence timing (final film grid): the pulse rests on each node, then travels to the next. */
+export const PATH_START = 12 + EMERGE_HOLD;
 export const STAGE_GAP = 2.1;
 export const stageTime = (k: number) => PATH_START + 0.6 + k * STAGE_GAP;
 

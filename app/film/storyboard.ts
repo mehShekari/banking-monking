@@ -8,13 +8,17 @@
 // `insertHold` then opens 2.2 s at 27.6 for the achievement beat, and the v2 props are keyed on
 // the final grid.
 
-import { STAGES, stageTime } from "./path";
+import { EMERGE_HOLD, STAGES, stageTime } from "./path";
 
 export const INTRO_END = 4.2;
 /** Where the achievement beat is inserted, and how long it holds. */
 const HOLD_AT = 27.6;
 const HOLD = 2.2;
-export const LENGTH = 40 + HOLD;
+/** Authoring grid length before the emergence hold (the v3 film). */
+const LENGTH_V3 = 40 + HOLD;
+export const LENGTH = LENGTH_V3 + EMERGE_HOLD;
+/** stageTime on the authoring grid (before the emergence hold). */
+const stageAt = (k: number) => stageTime(k) - EMERGE_HOLD;
 /** Where the doors stand, and where the card waits beyond them. */
 export const DOORS_Z = [-2.2, -5, -7.8, -10.6];
 export const END_Z = -17.2;
@@ -26,7 +30,7 @@ const PI = Math.PI;
 
 // The pulse rests 0.5 s on every stage node, then travels to the next.
 const pathKeys: Key[] = [[0, 0]];
-STAGES.forEach((st, k) => pathKeys.push([stageTime(k), st.s], [stageTime(k) + 0.5, st.s]));
+STAGES.forEach((st, k) => pathKeys.push([stageAt(k), st.s], [stageAt(k) + 0.5, st.s]));
 
 const base: Tracks = {
   Camera: {
@@ -64,7 +68,7 @@ const base: Tracks = {
     alpha: [[0, 0], [11.8, 0], [12.5, 1], [27.6, 1], [28.4, 0], [36, 0], [37.6, 0.7], [40, 0.7]],
   },
   Circuit: {
-    glow: [[0, 0], [11.8, 0], [12.8, 0.12], [stageTime(6), 0.9], [26.4, 1], [27.6, 1], [28.6, 0.15], [36, 0.15], [37.6, 0.4], [40, 0.4]],
+    glow: [[0, 0], [11.8, 0], [12.8, 0.12], [stageAt(6), 0.9], [26.4, 1], [27.6, 1], [28.6, 0.15], [36, 0.15], [37.6, 0.4], [40, 0.4]],
   },
   Intro: {
     talent: [[0, 0], [0.3, 0], [1.5, 1], [2.2, 1], [3.3, 0.22], [4.2, 0.15], [8.2, 0.05], [37.2, 0.05], [38.6, 0.3], [40, 0.3]],
@@ -100,27 +104,35 @@ function insertHold(src: Tracks, at: number, dur: number): Tracks {
   return out;
 }
 
-export const tracks: Tracks = insertHold(base, HOLD_AT, HOLD);
+const v3: Tracks = insertHold(base, HOLD_AT, HOLD);
 
-// v2 props, keyed on the final 42.2 s grid.
-Object.assign(tracks.Intro, {
+// v2/v3 props, keyed on the 42.2 s authoring grid.
+Object.assign(v3.Intro, {
   // The partners' braid: 0→1 descends onto the chosen talent, 1→2 cinches and dissolves.
-  streams: [[0, 0], [0.9, 0], [3.0, 1], [3.6, 2], [LENGTH, 2]],
+  streams: [[0, 0], [0.9, 0], [3.0, 1], [3.6, 2], [LENGTH_V3, 2]],
   // The talent field moves to the card for the finale (while it is at its dimmest).
-  fieldZ: [[0, 0], [37.8, 0], [37.85, END_Z - 1.5], [LENGTH, END_Z - 1.5]],
+  fieldZ: [[0, 0], [37.8, 0], [37.85, END_Z - 1.5], [LENGTH_V3, END_Z - 1.5]],
 });
-Object.assign(tracks.Card, {
+Object.assign(v3.Card, {
   // The face is assembled from light while the card turns out of the blade.
-  form: [[0, 0], [4.0, 0], [7.4, 1], [LENGTH, 1]],
+  form: [[0, 0], [4.0, 0], [7.4, 1], [LENGTH_V3, 1]],
   // The calligraphy is written by light (0→1), then glows by nameGlow.
-  ignite: [[0, 0], [6.9, 0], [8.8, 1], [LENGTH, 1]],
-  nameGlow: [[0, 0], [6.9, 0], [7.8, 1], [9.6, 0.22], [11.5, 0.22], [12.0, 1.3], [12.9, 0.22], [25.4, 0.22], [26.1, 0.9], [27.0, 0.22], [39.4, 0.22], [40.6, 0.3], [LENGTH, 0.3]],
+  ignite: [[0, 0], [6.9, 0], [8.8, 1], [LENGTH_V3, 1]],
+  nameGlow: [[0, 0], [6.9, 0], [7.8, 1], [9.6, 0.22], [11.5, 0.22], [12.0, 1.3], [12.9, 0.22], [25.4, 0.22], [26.1, 0.9], [27.0, 0.22], [39.4, 0.22], [40.6, 0.3], [LENGTH_V3, 0.3]],
 });
-Object.assign(tracks.Path, {
+Object.assign(v3.Path, {
   // Achievement recap: a wave runs the whole path, then the nodes lift into a constellation.
-  recap: [[0, -0.2], [25.9, -0.2], [26.9, 1.2], [LENGTH, 1.2]],
-  lift: [[0, 0], [26.8, 0], [27.9, 1], [29.0, 1], [29.8, 0], [LENGTH, 0]],
+  recap: [[0, -0.2], [25.9, -0.2], [26.9, 1.2], [LENGTH_V3, 1.2]],
+  lift: [[0, 0], [26.8, 0], [27.9, 1], [29.0, 1], [29.8, 0], [LENGTH_V3, 0]],
 });
+
+// The emergence: open 2.6 s at 4.2 (the card holds edge-on as a blade while light pours out of
+// it), then the face assembles over ~6 s (Card.form 4.0 → 10.0 on the final grid).
+export const tracks: Tracks = insertHold(v3, 4.2, EMERGE_HOLD);
+// A slow dolly toward the blade through the pour.
+tracks.Camera.z = tracks.Camera.z.map(([t, v]): Key => (t === 4.2 + EMERGE_HOLD ? [t, 5.25] : [t, v]));
+// Light pours: a stronger edge and beam while the blade is held.
+tracks.Light.edge = tracks.Light.edge.map(([t, v]): Key => (t === 4.2 + EMERGE_HOLD ? [t, 2.2] : [t, v]));
 
 /** Initial value per prop: the first keyframe. */
 export const defaults = Object.fromEntries(
