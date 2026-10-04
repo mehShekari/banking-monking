@@ -35,7 +35,7 @@ import { RectAreaLightTexturesLib } from "three/examples/jsm/lights/RectAreaLigh
 import { CARD_H, CARD_W, Card, FACE_Z, createRig } from "./Card";
 import { clock } from "./clock";
 import { Constellation } from "./Constellation";
-import { finale } from "./copy";
+import { finale, stages } from "./copy";
 import { DOOR_H, Doors } from "./Doors";
 import { Emergence } from "./Emergence";
 import { Talent } from "./Intro";
@@ -43,9 +43,10 @@ import { PathTrace } from "./PathTrace";
 import { STAGES, pointAt, stageTime } from "./path";
 import { sound } from "./sound";
 import { DOORS_Z, INTRO_END, LENGTH, buildState, defaults } from "./storyboard";
+import { FORM_OFFSETS, Formations, formStage } from "./Formations";
 import { Stations } from "./Stations";
 import exported from "./film-state.json";
-import { bokehAlpha, bokehScale, coc, lens, makeDoorsU, makeEmergeU, makePathU, makeTalentU, motion, streakSize, quality } from "./tsl";
+import { bokehAlpha, bokehScale, coc, lens, makeDoorsU, makeEmergeU, makeFormU, makePathU, makeTalentU, motion, streakSize, quality } from "./tsl";
 
 // Node materials (and the rest of three/webgpu) as JSX elements.
 extend(THREE as unknown as Parameters<typeof extend>[0]);
@@ -276,6 +277,7 @@ function Film({ onReady }: { onReady: () => void }) {
       doors: makeDoorsU(),
       talent: makeTalentU(),
       emerge: makeEmergeU(),
+      form: makeFormU(),
     }),
     [],
   );
@@ -323,14 +325,16 @@ function Film({ onReady }: { onReady: () => void }) {
     return [1, 0.85, 0.72, 0.6].map((k) => Math.max(0.6, top * k)).filter((v, i, a) => i === 0 || v < a[i - 1] - 0.01);
   }, []);
 
-  const anchors = useRef<{ stage: HTMLElement[]; door: HTMLElement[] }>({ stage: [], door: [] });
+  const anchors = useRef<{ stage: HTMLElement[]; door: HTMLElement[]; form: HTMLElement[] }>({ stage: [], door: [], form: [] });
+  const formLabel = useRef<number[]>([-1, -1]);
+  const reduced = useMemo(() => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches, []);
   const labelW = useRef<number[]>([]);
   useEffect(() => {
     const pick = (p: string) =>
       Array.from(document.querySelectorAll<HTMLElement>(`[data-anchor^="${p}-"]`)).sort(
         (a, b) => +a.dataset.anchor!.split("-")[1] - +b.dataset.anchor!.split("-")[1],
       );
-    anchors.current = { stage: pick("stage"), door: pick("door") };
+    anchors.current = { stage: pick("stage"), door: pick("door"), form: pick("form") };
   }, []);
 
   useEffect(() => {
@@ -390,7 +394,9 @@ function Film({ onReady }: { onReady: () => void }) {
   const cursorOn = useRef(0);
   useFrame((state, dt) => {
     const g = gov.current;
-    g.warm += dt;
+    // Only once the shaders are warm: compile frames are slow, and a DPR change mid-compile
+    // destroys the depth target under a pending pipeline, so the warm-up never resolves.
+    if (ready.current) g.warm += dt;
     if (g.warm > 3 && !document.hidden) {
       g.t += dt;
       g.n++;
@@ -548,11 +554,19 @@ function Film({ onReady }: { onReady: () => void }) {
     rig.uniforms.uDetail.value = C.follow;
     pointAt(P.progress, tmp.xy);
     rig.uniforms.uHeadUv.value.set(tmp.xy[0] / CARD_W + 0.5, tmp.xy[1] / CARD_H + 0.5);
-    rig.uniforms.uHeadOn.value = P.alpha * C.follow;
-    // The light sweep: keyed through the film, then held by the cursor in the finale.
-    // Band centre c ∈ [0,1] across the face ↔ sweep phase (c + 0.4) / 1.8 (see the face shader).
-    const cursorSweep = 1 + (THREE.MathUtils.clamp((p.sx + 1) / 2, 0.08, 0.92) + 0.4) / 1.8;
-    rig.uniforms.uSweep.value = THREE.MathUtils.lerp(L.sweep, cursorSweep, F.interact);
+    rig.uniforms.uHeadOn.value = P.alpha * C.follow * 0.45;
+    rig.uniforms.uHeadR.value = 0.05;
+    // Finale: no band of light across the card; the cursor carries a soft pool of light over
+    // the metal instead (the pointer unprojected onto the face, in card-local units).
+    if (F.interact > 0.01 && card && cursorOn.current > 0.001) {
+      tmp.v.copy(live.talent.uCursor.value);
+      card.worldToLocal(tmp.v);
+      const over = smooth(0.62, 0.5, Math.abs(tmp.v.x)) * smooth(0.95, 0.8, Math.abs(tmp.v.y));
+      rig.uniforms.uHeadUv.value.set(tmp.v.x / CARD_W + 0.5, tmp.v.y / CARD_H + 0.5);
+      rig.uniforms.uHeadOn.value = 0.35 * F.interact * cursorOn.current * over;
+      rig.uniforms.uHeadR.value = 0.16;
+    }
+    rig.uniforms.uSweep.value = L.sweep;
     rig.uniforms.uSweepAngle.value = L.sweepAngle;
     // Hovering the CTA gathers the card's network around it (after igloo.inc's link particles).
     hover.current += ((ctaHover.current ? 0.75 : 0) - hover.current) * Math.min(1, dt * 3);
@@ -612,6 +626,17 @@ function Film({ onReady }: { onReady: () => void }) {
       const k = (K.z - cam.position.z) / (tmp.ray.z || -1);
       live.talent.uCursor.value.copy(cam.position).addScaledVector(tmp.ray, k);
     }
+    // The finale's particle stations: one station every ~4.6 s, frozen on «اثر» for reduced motion.
+    const fu = live.form;
+    fu.uForm.value = F.form;
+    fu.uTime.value = t;
+    fu.uCycle.value = reduced ? 6 : F.form > 0.5 ? fu.uCycle.value + dt / 4.6 : 0;
+    if (card) fu.uCard.value.copy(card.position);
+    fu.uCursor.value.copy(live.talent.uCursor.value);
+    fu.uCursorOn.value = reduced ? 0 : cursorOn.current;
+    fu.uCharge.value = h.charge;
+    fu.uBurst.value = burstMix;
+    fu.uPortrait.value = portrait ? 1 : 0;
     // Less bloom while the camera rides the path: the head should glow, not the whole frame.
     post.bloom.strength.value = A.bloom * 0.7 * (1 - 0.4 * C.follow) + h.charge * 0.45 + burstMix * 0.3;
     // Focus sits on what the shot is about: the path head, or the card.
@@ -659,6 +684,27 @@ function Film({ onReady }: { onReady: () => void }) {
       el.style.transform = `translate3d(${((tmp.v.x + 1) / 2) * W}px, ${((1 - tmp.v.y) / 2) * H}px, 0)`;
       el.style.opacity = String(dz <= 0 ? 0 : smooth(10, 6.5, dz) * smooth(1.2, 3, dz) * live.doors.uAlpha.value);
     });
+    // Formation captions: the stage each particle station shows, under it (above it in portrait,
+    // where the card sits below); hidden while it morphs.
+    anchors.current.form.forEach((el, side) => {
+      const off = portrait ? FORM_OFFSETS.portrait : FORM_OFFSETS.sides[side];
+      const on = F.form * (portrait && side === 1 ? 0 : 1);
+      if (on < 0.01 || !card) {
+        el.style.opacity = "0";
+        return;
+      }
+      const cyc = fu.uCycle.value + (side === 1 ? 3 : 0);
+      const f = cyc - Math.floor(cyc);
+      const k = formStage(fu.uCycle.value + (f > 0.85 ? 0.2 : 0), side as 0 | 1);
+      if (formLabel.current[side] !== k) {
+        formLabel.current[side] = k;
+        (el.firstElementChild as HTMLElement).textContent = stages[k].title;
+      }
+      const vis = f < 0.85 ? 1 - smooth(0.62, 0.7, f) : smooth(0.92, 1, f);
+      tmp.v.set(card.position.x + off[0], card.position.y + off[1] + (portrait ? 0.34 : -0.52), card.position.z + off[2]).project(cam);
+      el.style.transform = `translate3d(${((tmp.v.x + 1) / 2) * W}px, ${((1 - tmp.v.y) / 2) * H}px, 0)`;
+      el.style.opacity = String(on * (reduced ? 1 : vis));
+    });
   }, -1);
 
   useFrame(() => {
@@ -666,8 +712,11 @@ function Film({ onReady }: { onReady: () => void }) {
     if (clock.covered && ready.current) return;
     post.pipeline.render();
     if (!ready.current && rig.card && !warming.current) {
-      // Shader warm-up behind the loading screen: every program compiles now, in parallel where
-      // the driver allows, instead of hitching the first time a door or the constellation appears.
+      // Shader warm-up behind the loading screen: every program compiles now, instead of hitching
+      // the first time a door or the constellation appears. One compileAsync per object, all at
+      // once: a single call over the scene compiles its pipelines one after another (~60 s cold
+      // on an iGPU); in parallel the driver's compile threads overlap them. Each call collects
+      // its object synchronously, so hidden objects are shown only within this block, never drawn.
       warming.current = true;
       const hidden: THREE.Object3D[] = [];
       scene.traverse((o) => {
@@ -676,16 +725,25 @@ function Film({ onReady }: { onReady: () => void }) {
           o.visible = true;
         }
       });
+      const drawables: THREE.Object3D[] = [];
+      scene.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh || (o as THREE.Sprite).isSprite || (o as THREE.Points).isPoints || (o as THREE.Line).isLine) drawables.push(o);
+      });
       // Compiled for the scene pass target (half-float), which is where the scene is drawn.
-      post.scenePass
-        .compileAsync(gl)
-        .catch(() => {})
-        .then(() => {
-          for (const o of hidden) o.visible = false;
-          post.pipeline.render(); // also compiles the post chain (the fracture branch is in the same shader)
-          ready.current = true;
-          onReady();
-        });
+      const target = gl.getRenderTarget();
+      const mrt = gl.getMRT();
+      gl.setRenderTarget(post.scenePass.renderTarget);
+      gl.setMRT(post.scenePass.getMRT());
+      const jobs = drawables.map((o) => gl.compileAsync(o, post.scenePass.camera, scene).catch(() => {}));
+      gl.setRenderTarget(target);
+      gl.setMRT(mrt);
+      for (const o of hidden) o.visible = false;
+      Promise.all(jobs).then(() => {
+        post.pipeline.render(); // also compiles the post chain (the fracture branch is in the same shader)
+        ready.current = true;
+        performance.mark("film-ready"); // load time, for DevTools and perf scripts
+        onReady();
+      });
     }
   }, 1);
 
@@ -708,6 +766,7 @@ function Film({ onReady }: { onReady: () => void }) {
       </mesh>
       <Dust u={live.dust} />
       <Talent u={live.talent} />
+      <Formations u={live.form} />
       <Doors u={live.doors} />
       <Card rig={rig}>
         <Emergence u={live.emerge} />

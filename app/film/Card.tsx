@@ -145,8 +145,9 @@ function faceNodes(mat: THREE.MeshPhysicalNodeMaterial, U: CardU, mask: THREE.Te
     mat.colorNode = mix(materialColor.rgb, LETTER(), nm.mul(U.uDetail));
 
     // The path head's soft pool of light on the metal (card-local units, so it stays round).
-    const hd = length(positionGeometry.xy.sub(U.uHeadUv.sub(0.5).mul(vec2(CARD_W, CARD_H)))).div(0.05);
-    emissive = emissive.add(vec3(0.45, 0.78, 1.0).mul(U.uHeadOn.mul(0.14).mul(exp(hd.mul(hd).negate()))));
+    // A soft pool of cool light on the metal: the path head (small), or the finale cursor (wide).
+    const hd = length(positionGeometry.xy.sub(U.uHeadUv.sub(0.5).mul(vec2(CARD_W, CARD_H)))).div(U.uHeadR);
+    emissive = emissive.add(vec3(0.82, 0.9, 1.0).mul(U.uHeadOn.mul(0.3).mul(exp(hd.mul(hd).negate()))));
 
     const col = floor(fuv.x.mul(110));
     const h = fract(sin(col.mul(12.9898).add(4.1)).mul(43758.5453));

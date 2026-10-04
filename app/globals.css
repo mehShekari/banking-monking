@@ -15,8 +15,14 @@
   --signal-deep: #2c6fd1;
   --shade: rgb(4 8 22 / 0.85);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  /* One family: display is IRANSans at heavier weights. */
+  --font-display: var(--font-text);
   color-scheme: dark;
 }
+
+/* Larger type on big desktops: every rem (and every clamp's rem cap) scales with the root. */
+@media (min-width: 1440px) { html { font-size: 112.5%; } }
+@media (min-width: 1920px) { html { font-size: 125%; } }
 
 html {
   background: var(--void);
@@ -259,6 +265,19 @@ body {
   font-size: clamp(1.3rem, 2.6vw, 2.2rem);
   color: var(--ink);
   text-shadow: 0 0 24px rgb(124 196 255 / 0.7), 0 2px 20px var(--shade);
+}
+
+[data-anchor^="form"] { opacity: 0; }
+.form-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  translate: -50% 0;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-size: clamp(0.85rem, 1.1vw, 1.05rem);
+  color: var(--ink);
+  text-shadow: 0 2px 14px var(--shade);
 }
 
 /* ── Finale ───────────────────────────────────────────── */

@@ -86,9 +86,31 @@ export const makeCardU = () => ({
   uDetail: uniform(0),
   /** The path head on the card face, in face uv (0..1): a soft pool of light on the metal. */
   uHeadUv: uniform(new Vector2(0.5, 0.5)),
-  /** 0…1: strength of that light pool (the path's alpha). */
+  /** 0…1: strength of that light pool (the path's alpha, or the finale cursor). */
   uHeadOn: uniform(0),
+  /** Radius of the light pool in card units: small for the path head, wide for the cursor. */
+  uHeadR: uniform(0.05),
 });
 export const makeNetworkU = () => ({ uMix: uniform(0), uTime: uniform(0), uSize: uniform(28) });
 export type CardU = ReturnType<typeof makeCardU>;
 export type NetworkU = ReturnType<typeof makeNetworkU>;
+
+/** The finale's particle stations (Formations.tsx), world space. */
+export const makeFormU = () => ({
+  /** 0…1: the entrance (particles stream out of the card and assemble); scrubbed. */
+  uForm: uniform(0),
+  uTime: uniform(0),
+  /** Station cycle position in stations (0…7, wraps): k = floor, morph = fract past the dwell. */
+  uCycle: uniform(0),
+  /** World-space centre of the card (where the entrance streams from, where the charge pulls to). */
+  uCard: uniform(new Vector3()),
+  /** The pointer on the card's depth plane, and how present it is (0…1). */
+  uCursor: uniform(new Vector3()),
+  uCursorOn: uniform(0),
+  /** Hold-to-charge 0…1, and the burst envelope 0…1 after release. */
+  uCharge: uniform(0),
+  uBurst: uniform(0),
+  /** 1 on portrait screens: one formation above the card instead of two beside it. */
+  uPortrait: uniform(0),
+});
+export type FormU = ReturnType<typeof makeFormU>;

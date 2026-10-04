@@ -286,6 +286,11 @@ export default function CardFilm() {
           <div className="door-label">{d}</div>
         </div>
       ))}
+      {[0, 1].map((k) => (
+        <div key={k} data-anchor={`form-${k}`} className="anchor" aria-hidden>
+          <div className="form-label" />
+        </div>
+      ))}
 
       {/* The film's chrome, faded as one by the end credits. */}
       <div className="chrome">
