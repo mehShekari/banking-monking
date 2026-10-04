@@ -214,13 +214,14 @@ body {
   position: absolute;
   top: 0;
   width: max-content;
-  max-width: 25rem;
+  max-width: calc(19rem + var(--gap, 6rem)); /* the padding (gap) is inside the box */
   translate: 0 -50%;
   transform-origin: center;
   text-shadow: 0 1px 2px var(--shade), 0 0 14px var(--shade);
 }
-[data-side="right"] .stage-label { left: 0; padding-left: 6rem; text-align: left; transform-origin: left center; }
-[data-side="left"] .stage-label { right: 0; padding-right: 6rem; transform-origin: right center; }
+/* --gap: the emblem's on-screen reach, written by the scene each frame. */
+[data-side="right"] .stage-label { left: 0; padding-left: var(--gap, 6rem); text-align: left; transform-origin: left center; }
+[data-side="left"] .stage-label { right: 0; padding-right: var(--gap, 6rem); transform-origin: right center; }
 .stage-label > * {
   /* The mask box is padded out so the legibility shadow fades inside it instead of being cut square. */
   padding: 0.6em 1em;
@@ -559,7 +560,7 @@ body {
   .rail button:hover .name { opacity: 0; }
   .rail [aria-current] .name { opacity: 1; }
   .caption { bottom: 12vh; }
-  .stage-label { max-width: 11rem; }
+  .stage-label { max-width: calc(5rem + var(--gap, 6rem)); }
   .stage-label h3 { font-size: 1.25rem; }
   .stage-label p { font-size: 0.85rem; }
   .finale .hint { display: none; }

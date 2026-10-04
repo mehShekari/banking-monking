@@ -44,7 +44,7 @@ import { STAGES, pointAt, stageTime } from "./path";
 import { sound } from "./sound";
 import { DOORS_Z, INTRO_END, LENGTH, buildState, defaults } from "./storyboard";
 import { FORM_OFFSETS, Formations, formStage } from "./Formations";
-import { Stations } from "./Stations";
+import { EMBLEM_R, Stations } from "./Stations";
 import exported from "./film-state.json";
 import { bokehAlpha, bokehScale, coc, lens, makeDoorsU, makeEmergeU, makeFormU, makePathU, makeTalentU, motion, streakSize, quality } from "./tsl";
 
@@ -668,9 +668,19 @@ function Film({ onReady }: { onReady: () => void }) {
         const s = STAGES[k];
         if (!s) return;
         tmp.v.set(s.pos[0], s.pos[1], FACE_Z).applyMatrix4(card.matrixWorld).project(cam);
+        // Clear the emblem: the gap to the node is its on-screen reach, so in the macro shot,
+        // where an emblem is hundreds of pixels wide, the title still sits beside it, not on it.
+        tmp.head.set(s.pos[0] + EMBLEM_R, s.pos[1], FACE_Z).applyMatrix4(card.matrixWorld).project(cam);
+        const gap = Math.max(96, Math.hypot((tmp.head.x - tmp.v.x) * W, (tmp.head.y - tmp.v.y) * H) / 2 + 28);
+        el.style.setProperty("--gap", `${gap.toFixed(0)}px`);
         // Keep the whole title on screen: it runs away from its node, toward the side it names,
         // and the rail owns the inline-end (left) edge.
-        const w = (labelW.current[k] ||= (el.firstElementChild as HTMLElement).offsetWidth);
+        const label = el.firstElementChild as HTMLElement;
+        if (!labelW.current[k]) {
+          const cs = getComputedStyle(label);
+          labelW.current[k] = label.offsetWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+        }
+        const w = labelW.current[k] + gap;
         const left = el.dataset.side === "left";
         const x = THREE.MathUtils.clamp(((tmp.v.x + 1) / 2) * W, left ? w + 56 : 16, W - (left ? 16 : w + 16));
         el.style.transform = `translate3d(${x}px, ${((1 - tmp.v.y) / 2) * H}px, 0)`;
