@@ -1,0 +1,565 @@
+@import "tailwindcss";
+
+@property --reveal {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+:root {
+  --void: #111c3d;
+  --night: #0a1128;
+  --ink: #e8f1ff;
+  --ink-dim: #a9b8d6;
+  --signal: #7cc4ff;
+  --signal-deep: #2c6fd1;
+  --shade: rgb(4 8 22 / 0.85);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  color-scheme: dark;
+}
+
+html {
+  background: var(--void);
+  scrollbar-width: thin;
+  scrollbar-color: rgb(232 241 255 / 0.18) var(--void);
+}
+
+body {
+  margin: 0;
+  background: var(--void);
+  color: var(--ink);
+  font-family: var(--font-text), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: rgb(124 196 255 / 0.32);
+  color: var(--ink);
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 4px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Stage ─────────────────────────────────────────────── */
+
+.stage {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+}
+
+.bar {
+  position: fixed;
+  inset-inline: 0;
+  height: 11vh;
+  background: #000;
+  z-index: 5;
+  pointer-events: none;
+}
+.bar-top { top: 0; transform-origin: top; }
+.bar-bottom { bottom: 0; transform-origin: bottom; }
+
+.loading {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  width: 7rem;
+  height: 1px;
+  translate: -50% 0;
+  background: linear-gradient(90deg, transparent, var(--ink), transparent);
+  animation: loading 1.6s var(--ease-out) infinite;
+  z-index: 6;
+}
+@keyframes loading {
+  from { opacity: 0; scale: 0.2 1; }
+  50% { opacity: 0.7; }
+  to { opacity: 0; scale: 1 1; }
+}
+
+/* Everything below is cued by the film timeline; hidden until its moment. */
+.credits p,
+.cue,
+.caption .w,
+.caption p,
+.stage-label,
+.finale .w,
+.finale .sub,
+.finale .cta,
+.finale small,
+.finale .hint,
+.request,
+.rail,
+.sound {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.credits {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  z-index: 6;
+  pointer-events: none;
+}
+.credits > * { grid-area: 1 / 1; }
+.credits p {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 500;
+  text-align: center;
+}
+/* Three partners, one name each, stacked as they arrive. */
+[data-credit="issuers"] {
+  display: grid;
+  justify-items: center;
+  gap: 0.55em;
+  font-size: clamp(1.15rem, 2.1vw, 1.7rem);
+}
+[data-credit="present"] { font-size: clamp(0.95rem, 1.4vw, 1.15rem); color: var(--ink-dim); }
+
+.cue {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 2.2vh;
+  margin: 0;
+  display: grid;
+  justify-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+  color: var(--ink-dim);
+  z-index: 6;
+  pointer-events: none;
+}
+.cue-line {
+  width: 1px;
+  height: 2rem;
+  background: linear-gradient(var(--ink), transparent);
+  transform-origin: top;
+  animation: cue 2.2s var(--ease-out) infinite;
+}
+@keyframes cue {
+  from { scale: 1 0; opacity: 1; }
+  70% { scale: 1 1; opacity: 1; }
+  to { scale: 1 1; opacity: 0; }
+}
+
+/* ── Captions: film titles set straight into the dark ─── */
+
+.caption {
+  position: fixed;
+  inset-inline-start: clamp(1.25rem, 7vw, 7rem);
+  bottom: 15vh;
+  max-width: min(34rem, 82vw);
+  z-index: 3;
+  pointer-events: none;
+  text-shadow: 0 2px 28px var(--shade), 0 0 2px var(--shade);
+}
+.caption h2,
+.finale h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+.caption h2 { font-size: clamp(1.9rem, 4vw, 3.4rem); }
+.caption p {
+  margin: 1rem 0 0;
+  max-width: 40ch;
+  font-size: clamp(0.98rem, 1.2vw, 1.12rem);
+  line-height: 1.9;
+  color: var(--ink-dim);
+}
+.w { display: inline-block; }
+
+/* ── Anchors: positioned every frame by the 3D scene ── */
+
+.stages {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.anchor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+/* Doors fade by camera distance (the scene writes their opacity). */
+[data-anchor^="door"] { opacity: 0; }
+
+/* Stage titles are written by the pulse: a right-to-left reveal with a bright front. */
+.stage-label {
+  position: absolute;
+  top: 0;
+  width: max-content;
+  max-width: 19rem;
+  translate: 0 -50%;
+  transform-origin: center;
+  text-shadow: 0 1px 2px var(--shade), 0 0 14px var(--shade);
+}
+[data-side="right"] .stage-label { left: 0; padding-left: 1.8rem; text-align: left; transform-origin: left center; }
+[data-side="left"] .stage-label { right: 0; padding-right: 1.8rem; transform-origin: right center; }
+.stage-label > * {
+  /* The mask box is padded out so the legibility shadow fades inside it instead of being cut square. */
+  padding: 0.6em 1em;
+  margin: -0.6em -1em;
+  mask-image: linear-gradient(to left, #000 calc(var(--reveal) * 112% - 12%), transparent calc(var(--reveal) * 112%));
+}
+.stage-label::after {
+  content: "";
+  position: absolute;
+  inset-block: 8%;
+  right: calc(var(--reveal) * 100%);
+  width: 2px;
+  border-radius: 2px;
+  background: var(--ink);
+  box-shadow: 0 0 10px 2px var(--signal), 0 0 28px 6px rgb(124 196 255 / 0.45);
+  opacity: calc((1 - var(--reveal)) * 1.6);
+}
+.stage-label h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.6rem, 2.6vw, 2.3rem);
+  line-height: 1.3;
+  color: var(--signal);
+  text-shadow: 0 0 18px rgb(124 196 255 / 0.55), 0 2px 18px var(--shade);
+}
+.stage-label p {
+  margin: 0.35rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.8;
+  color: var(--ink);
+}
+
+.door-label {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  translate: -50% 0;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(1.3rem, 2.6vw, 2.2rem);
+  color: var(--ink);
+  text-shadow: 0 0 24px rgb(124 196 255 / 0.7), 0 2px 20px var(--shade);
+}
+
+/* ── Finale ───────────────────────────────────────────── */
+
+.finale {
+  position: fixed;
+  inset-inline: 0;
+  bottom: 8vh;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  padding-inline: 1.25rem;
+  z-index: 4;
+  pointer-events: none;
+  text-shadow: 0 2px 30px var(--shade);
+}
+.finale h2 { font-size: clamp(2.1rem, 5vw, 4.4rem); }
+.finale .sub {
+  margin: 0.7rem 0 0;
+  font-size: clamp(1rem, 1.6vw, 1.3rem);
+  color: var(--ink-dim);
+}
+.finale .hint {
+  margin: 1rem 0 0;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+.magnet {
+  display: inline-block;
+  margin-top: 1.8rem;
+  pointer-events: auto;
+}
+.finale small {
+  margin-top: 1.4rem;
+  font-size: 0.8rem;
+  color: var(--ink-dim);
+}
+
+.cta {
+  position: relative;
+  display: inline-block;
+  overflow: hidden;
+  padding: 1rem 2.6rem;
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--void);
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.15rem;
+  text-decoration: none;
+  text-shadow: none;
+  pointer-events: auto;
+  box-shadow: 0 10px 40px -12px rgb(124 196 255 / 0.55);
+  transition: box-shadow 0.5s var(--ease-out), translate 0.5s var(--ease-out);
+}
+/* The same light sweep that crosses the card, crossing the button. */
+.cta::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg, transparent 35%, rgb(124 196 255 / 0.55) 50%, transparent 65%);
+  translate: 110% 0;
+  transition: translate 0.9s var(--ease-out);
+}
+.cta:hover { translate: 0 -2px; box-shadow: 0 16px 50px -12px rgb(124 196 255 / 0.75); }
+.cta:hover::after { translate: -110% 0; }
+.cta:active { translate: 0 0; }
+
+.request {
+  position: fixed;
+  top: 3.2vh;
+  inset-inline-start: clamp(1.25rem, 3vw, 3rem);
+  z-index: 7;
+  padding: 0.6rem 1.25rem;
+  border: 1px solid rgb(232 241 255 / 0.28);
+  border-radius: 10px;
+  color: var(--ink);
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: border-color 0.4s var(--ease-out), background-color 0.4s var(--ease-out);
+}
+.request:hover { border-color: var(--signal); background: rgb(124 196 255 / 0.08); }
+
+/* ── Film rail ────────────────────────────────────────── */
+
+.rail {
+  position: fixed;
+  inset-inline-end: clamp(1rem, 2.6vw, 2.6rem);
+  top: 24vh;
+  bottom: 24vh;
+  width: 6rem;
+  z-index: 7;
+}
+.rail-track {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  width: 1px;
+  background: rgb(232 241 255 / 0.14);
+}
+.rail-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--signal);
+  transform-origin: top;
+  transform: scaleY(0);
+  box-shadow: 0 0 10px var(--signal);
+}
+.rail ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.rail li {
+  position: absolute;
+  inset-inline-end: 0;
+  translate: 0 -50%;
+}
+.rail button {
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 24px;
+  padding: 0;
+  margin-inline-end: -4px;
+  background: none;
+  border: 0;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+.rail .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1px solid rgb(232 241 255 / 0.45);
+  background: var(--void);
+  transition: background-color 0.4s var(--ease-out), box-shadow 0.4s var(--ease-out), border-color 0.4s;
+}
+.rail .name {
+  opacity: 0;
+  translate: 6px 0;
+  transition: opacity 0.4s var(--ease-out), translate 0.4s var(--ease-out);
+  white-space: nowrap;
+}
+.rail button:hover .name,
+.rail button:focus-visible .name,
+.rail [aria-current] .name {
+  opacity: 1;
+  translate: 0 0;
+}
+.rail [aria-current] { color: var(--ink); }
+.rail [aria-current] .dot {
+  border-color: var(--signal);
+  background: var(--signal);
+  box-shadow: 0 0 12px 1px var(--signal);
+}
+.rail button:hover .dot { border-color: var(--ink); }
+
+/* Sound: its icon sits on the rail's line, below it. Waves are drawn only when on. */
+.sound {
+  position: fixed;
+  inset-inline-end: calc(clamp(1rem, 2.6vw, 2.6rem) - 10px);
+  bottom: 6vh;
+  z-index: 7;
+  display: flex;
+  flex-direction: row-reverse;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 44px;
+  padding: 0 0.25rem 0 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: color 0.4s var(--ease-out);
+}
+.sound svg {
+  flex: none;
+  overflow: visible;
+  transition: color 0.4s var(--ease-out), filter 0.4s var(--ease-out), scale 0.2s var(--ease-out);
+}
+/* Opacity too: a fully offset dash still leaves its round caps as dots. */
+.sound .wave {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+  transition: stroke-dashoffset 0.6s var(--ease-out), opacity 0.2s var(--ease-out);
+}
+.sound .wave + .wave { transition-delay: 0.08s; }
+.sound:hover,
+.sound[aria-pressed="true"] { color: var(--ink); }
+.sound[aria-pressed="true"] svg {
+  color: var(--signal);
+  filter: drop-shadow(0 0 6px rgb(124 196 255 / 0.6));
+}
+.sound[aria-pressed="true"] .wave { stroke-dashoffset: 0; opacity: 1; }
+.sound:active svg { scale: 0.9; }
+
+/* ── End credits: the brochure, rolling up over the film ── */
+
+.end-credits {
+  position: relative;
+  z-index: 3;
+  padding: 58vh 1.25rem 20vh;
+  background: linear-gradient(transparent, var(--void) 40vh);
+  text-align: center;
+}
+.end-credits-col {
+  width: min(52ch, 100%);
+  margin-inline: auto;
+  font-size: clamp(1rem, 1.15vw, 1.1rem);
+  line-height: 2;
+  color: var(--ink-dim);
+  text-wrap: pretty;
+}
+.end-credits p { margin: 0; }
+.end-credits p + p { margin-top: 0.9rem; }
+.end-credits h2,
+.end-credits h3,
+.opportunities li,
+.end-credits .signoff {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.45;
+  color: var(--ink);
+  text-wrap: balance;
+}
+.end-credits h2 {
+  margin: 0 0 2.4rem;
+  font-size: clamp(2rem, 4.2vw, 3.4rem);
+  line-height: 1.35;
+}
+.privileges,
+.opportunities {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.privileges { margin-top: 6rem; gap: 3.4rem; }
+.privileges h3 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(1.25rem, 2vw, 1.6rem);
+}
+.access { margin-top: 9rem; }
+.access h3 {
+  margin: 3.4rem 0 1.6rem;
+  font-size: clamp(1.9rem, 3.6vw, 2.8rem);
+  color: var(--signal);
+  text-shadow: 0 0 18px rgb(124 196 255 / 0.45);
+}
+.opportunities { gap: 0.7rem; }
+.opportunities li {
+  font-weight: 500;
+  font-size: clamp(1.15rem, 1.8vw, 1.45rem);
+}
+.end-credits .closing { margin-top: 6rem; }
+.end-credits .signoff {
+  margin-top: 9rem;
+  font-size: clamp(1.9rem, 4vw, 3.2rem);
+  line-height: 1.5;
+}
+.signoff span { display: block; }
+.end-credits .cta { margin-top: 3.6rem; }
+.end-credits small {
+  display: block;
+  margin-top: 2.6rem;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 640px) {
+  .rail { top: 30vh; bottom: 30vh; }
+  .rail button:hover .name { opacity: 0; }
+  .rail [aria-current] .name { opacity: 1; }
+  .caption { bottom: 12vh; }
+  .stage-label { max-width: 11rem; }
+  .stage-label h3 { font-size: 1.25rem; }
+  .stage-label p { font-size: 0.85rem; }
+  .finale .hint { display: none; }
+  .request { padding: 0.5rem 1rem; font-size: 0.82rem; }
+  /* Below the rail: bottom 6vh would sit on the finale's issuers line. */
+  .sound { bottom: calc(30vh - 3.5rem); }
+  .end-credits { padding: 48vh 1.25rem 16vh; }
+  .privileges { margin-top: 4.5rem; gap: 2.6rem; }
+  .access { margin-top: 6.5rem; }
+  .access h3 { margin-top: 2.6rem; }
+  .end-credits .closing { margin-top: 4.5rem; }
+  .end-credits .signoff { margin-top: 6.5rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading,
+  .cue-line { animation: none; opacity: 0.6; }
+  .cta,
+  .cta::after,
+  .sound svg,
+  .sound .wave { transition: none; }
+}
