@@ -1,6 +1,6 @@
 "use client";
 
-import { getProject, type ISheetObject } from "@theatre/core";
+import { getProject, types, type ISheetObject } from "@theatre/core";
 import { Canvas, extend, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { Suspense, useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
@@ -32,7 +32,7 @@ import {
 import { bloom } from "three/examples/jsm/tsl/display/BloomNode.js";
 import { smaa } from "three/examples/jsm/tsl/display/SMAANode.js";
 import { RectAreaLightTexturesLib } from "three/examples/jsm/lights/RectAreaLightTexturesLib.js";
-import { Card, FACE_Z, createRig } from "./Card";
+import { CARD_H, CARD_W, Card, FACE_Z, createRig } from "./Card";
 import { clock } from "./clock";
 import { Constellation } from "./Constellation";
 import { finale } from "./copy";
@@ -42,7 +42,9 @@ import { Talent } from "./Intro";
 import { PathTrace } from "./PathTrace";
 import { STAGES, pointAt, stageTime } from "./path";
 import { sound } from "./sound";
-import { DOORS_Z, buildState, defaults } from "./storyboard";
+import { DOORS_Z, INTRO_END, LENGTH, buildState, defaults } from "./storyboard";
+import { Stations } from "./Stations";
+import exported from "./film-state.json";
 import { bokehAlpha, bokehScale, coc, lens, makeDoorsU, makeEmergeU, makePathU, makeTalentU, motion, streakSize, quality } from "./tsl";
 
 // Node materials (and the rest of three/webgpu) as JSX elements.
@@ -56,12 +58,53 @@ const studioMode =
 
 if (studioMode) import("@theatre/studio").then((m) => m.default.initialize());
 
-const sheet = getProject("Pazhoohesh-Yar Film", { state: buildState(SHEET) }).sheet(SHEET);
-const obj = Object.fromEntries(Object.entries(defaults).map(([k, props]) => [k, sheet.object(k, props)])) as Record<
-  string,
-  ISheetObject<Record<string, number>>
->;
+// The timeline: a Theatre Studio export in film-state.json wins (see docs/studio.md); with
+// none (the file holds `null`), it is built from the keys in storyboard.ts.
+const state = exported && typeof exported === "object" ? (exported as object) : buildState(SHEET);
+const sheet = getProject("Pazhoohesh-Yar Film", { state }).sheet(SHEET);
+
+// Slider ranges for Studio: the props worth dragging by hand get sensible bounds.
+const RANGES: Record<string, Record<string, [number, number]>> = {
+  Camera: {
+    fDist: [0.2, 3], fYaw: [-1.6, 1.6], fPitch: [-1.3, 1.3], fLead: [-0.1, 0.15], fRoll: [-0.4, 0.4],
+    fov: [12, 60], follow: [0, 1], frame: [0, 1], roll: [-0.4, 0.4],
+  },
+};
+const obj = Object.fromEntries(
+  Object.entries(defaults).map(([k, props]) => [
+    k,
+    sheet.object(
+      k,
+      Object.fromEntries(
+        Object.entries(props).map(([p, val]) => {
+          const r = RANGES[k]?.[p];
+          return [p, r ? types.number(val, { range: r, nudgeMultiplier: (r[1] - r[0]) / 200 }) : val];
+        }),
+      ),
+    ),
+  ]),
+) as unknown as Record<string, ISheetObject<Record<string, number>>>;
 const v = (o: string) => obj[o].value as Record<string, number>;
+
+// Studio ↔ page. Dragging the Studio playhead scrolls the page there (so captions, labels and
+// sound follow through the normal scroll path); scrolling moves the playhead. Whichever moved
+// last leads for a moment, so the two never fight.
+const studioSync = { seq: -1, lead: 0 };
+function syncStudio() {
+  const seq = sheet.sequence.position;
+  const now = performance.now();
+  if (studioSync.seq >= 0 && Math.abs(seq - studioSync.seq) > 1e-4 && Math.abs(seq - clock.t) > 0.05) {
+    studioSync.lead = now + 1600; // Studio moved the playhead
+    const track = document.querySelector<HTMLElement>("[data-track]");
+    if (track && seq >= INTRO_END) {
+      const range = track.offsetHeight - window.innerHeight;
+      window.scrollTo(0, ((seq - INTRO_END) / (LENGTH - INTRO_END)) * range);
+    }
+  } else if (now > studioSync.lead) {
+    sheet.sequence.position = clock.t;
+  }
+  studioSync.seq = sheet.sequence.position;
+}
 
 /** Overall light level for the card lights; one knob for "too bright / too dark". */
 const LIGHT = 0.65;
@@ -376,6 +419,7 @@ function Film({ onReady }: { onReady: () => void }) {
       }
     }
     if (!studioMode) sheet.sequence.position = clock.t;
+    else syncStudio();
     const C = v("Camera");
     const K = v("Card");
     const L = v("Light");
@@ -430,9 +474,15 @@ function Film({ onReady }: { onReady: () => void }) {
     tmp.target.set(C.tx, C.ty, C.tz);
     tmp.pos.set(C.x, C.y, C.z);
     if (C.follow > 0 && card) {
-      pointAt(P.progress, tmp.xy);
-      tmp.head.set(tmp.xy[0], tmp.xy[1], FACE_Z).applyMatrix4(card.matrixWorld);
-      tmp.v.set(0.1, -0.24, portrait ? 1.9 : 1.45).add(tmp.head);
+      // Orbit the path head in card space, looking a little ahead along the arc (all authored
+      // in Theatre: fDist, fYaw, fPitch, fLead, fRoll).
+      pointAt(P.progress + C.fLead, tmp.xy);
+      tmp.head.set(tmp.xy[0], tmp.xy[1], FACE_Z);
+      const d = C.fDist * (portrait ? 1.3 : 1);
+      const cp = Math.cos(C.fPitch);
+      tmp.v.set(Math.sin(C.fYaw) * cp, Math.sin(C.fPitch), Math.cos(C.fYaw) * cp).multiplyScalar(d).add(tmp.head);
+      tmp.head.applyMatrix4(card.matrixWorld);
+      tmp.v.applyMatrix4(card.matrixWorld);
       tmp.target.lerp(tmp.head, C.follow);
       tmp.pos.lerp(tmp.v, C.follow);
     }
@@ -453,7 +503,7 @@ function Film({ onReady }: { onReady: () => void }) {
     tmp.pos.y -= p.sy * 0.06 * sway + Math.cos(t * 41) * 0.003 * h.charge;
     cam.position.copy(tmp.pos);
     cam.lookAt(tmp.target);
-    cam.rotateZ(C.roll);
+    cam.rotateZ(C.roll + C.fRoll * C.follow);
     if (cam.fov !== C.fov) {
       cam.fov = C.fov;
       cam.updateProjectionMatrix();
@@ -486,7 +536,8 @@ function Film({ onReady }: { onReady: () => void }) {
       haze.current?.position.set(c.x, c.y, c.z - 7);
       beam.current?.position.set(c.x - 0.6, c.y + 3.2, c.z - 1.2);
     }
-    if (key.current) key.current.intensity = L.key * LIGHT;
+    // The key light is a side fill, not a spotlight: half strength keeps the metal from going flat-blue.
+    if (key.current) key.current.intensity = L.key * LIGHT * 0.5;
 
     rig.uniforms.uTime.value = t;
     rig.uniforms.uGlow.value = v("Circuit").glow;
@@ -494,6 +545,10 @@ function Film({ onReady }: { onReady: () => void }) {
     rig.uniforms.uForm.value = K.form;
     rig.uniforms.uIgnite.value = K.ignite;
     rig.uniforms.uNameGlow.value = K.nameGlow;
+    rig.uniforms.uDetail.value = C.follow;
+    pointAt(P.progress, tmp.xy);
+    rig.uniforms.uHeadUv.value.set(tmp.xy[0] / CARD_W + 0.5, tmp.xy[1] / CARD_H + 0.5);
+    rig.uniforms.uHeadOn.value = P.alpha * C.follow;
     // The light sweep: keyed through the film, then held by the cursor in the finale.
     // Band centre c ∈ [0,1] across the face ↔ sweep phase (c + 0.4) / 1.8 (see the face shader).
     const cursorSweep = 1 + (THREE.MathUtils.clamp((p.sx + 1) / 2, 0.08, 0.92) + 0.4) / 1.8;
@@ -513,7 +568,7 @@ function Film({ onReady }: { onReady: () => void }) {
     post.u.aspect.value = size.width / size.height;
     rig.network.uTime.value = t;
     rig.network.uSize.value = 22 * gl.getPixelRatio();
-    if (rig.faces[0]) rig.faces[0].envMapIntensity = L.env * (1 + 0.45 * (1 - areaK));
+    if (rig.faces[0]) rig.faces[0].envMapIntensity = L.env * (1 + 0.1 * (1 - areaK));
     if (rig.faces[1]) rig.faces[1].envMapIntensity = L.env * 0.5;
     if (rig.edge) {
       rig.edge.emissiveIntensity = L.edge * 0.6 + h.charge * 2.5;
@@ -557,7 +612,8 @@ function Film({ onReady }: { onReady: () => void }) {
       const k = (K.z - cam.position.z) / (tmp.ray.z || -1);
       live.talent.uCursor.value.copy(cam.position).addScaledVector(tmp.ray, k);
     }
-    post.bloom.strength.value = A.bloom * 0.7 + h.charge * 0.45 + burstMix * 0.3;
+    // Less bloom while the camera rides the path: the head should glow, not the whole frame.
+    post.bloom.strength.value = A.bloom * 0.7 * (1 - 0.4 * C.follow) + h.charge * 0.45 + burstMix * 0.3;
     // Focus sits on what the shot is about: the path head, or the card.
     lens.focus.value = cam.position.distanceTo(tmp.target);
     lens.bokeh.value = A.dof;
@@ -657,6 +713,7 @@ function Film({ onReady }: { onReady: () => void }) {
         <Emergence u={live.emerge} />
         <PathTrace u={live.path} />
         <Constellation u={live.path} />
+        <Stations u={live.path} />
       </Card>
     </>
   );

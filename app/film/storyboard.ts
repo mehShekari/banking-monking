@@ -68,7 +68,7 @@ const base: Tracks = {
     alpha: [[0, 0], [11.8, 0], [12.5, 1], [27.6, 1], [28.4, 0], [36, 0], [37.6, 0.7], [40, 0.7]],
   },
   Circuit: {
-    glow: [[0, 0], [11.8, 0], [12.8, 0.12], [stageAt(6), 0.9], [26.4, 1], [27.6, 1], [28.6, 0.15], [36, 0.15], [37.6, 0.4], [40, 0.4]],
+    glow: [[0, 0], [11.8, 0], [12.8, 0.08], [stageAt(6), 0.28], [26.4, 1], [27.6, 1], [28.6, 0.15], [36, 0.15], [37.6, 0.4], [40, 0.4]],
   },
   Intro: {
     talent: [[0, 0], [0.3, 0], [1.5, 1], [2.2, 1], [3.3, 0.22], [4.2, 0.15], [8.2, 0.05], [37.2, 0.05], [38.6, 0.3], [40, 0.3]],
@@ -88,7 +88,7 @@ const base: Tracks = {
     // Act transitions: short chromatic/displacement pulses where one act hands over to the next.
     shift: [[0, 0], [3.35, 0], [3.55, 0.55], [3.85, 0], [11.7, 0], [12.0, 0.6], [12.4, 0], [28.0, 0], [28.35, 1], [28.8, 0], [35.5, 0], [35.8, 0.7], [36.2, 0], [40, 0]],
     // Depth of field (aperture scale): shallow on the macro path, off while the doors fly by.
-    dof: [[0, 0.4], [4.2, 0.4], [8.2, 0.5], [12.8, 1.3], [26.6, 1.3], [27.6, 0.4], [28.6, 0], [35.6, 0], [37.4, 0.2], [40, 0.2]],
+    dof: [[0, 0.4], [4.2, 0.4], [8.2, 0.5], [12.8, 0.55], [26.6, 0.55], [27.6, 0.4], [28.6, 0], [35.6, 0], [37.4, 0.2], [40, 0.2]],
   },
 };
 
@@ -125,6 +125,26 @@ Object.assign(v3.Path, {
   recap: [[0, -0.2], [25.9, -0.2], [26.9, 1.2], [LENGTH_V3, 1.2]],
   lift: [[0, 0], [26.8, 0], [27.9, 1], [29.0, 1], [29.8, 0], [LENGTH_V3, 0]],
 });
+
+// The Path's camera: while Camera.follow is on, the camera orbits the path head in card space —
+// fDist from the face, fYaw/fPitch around it (pitch < 0 sits below, looking up the trace),
+// fLead looks ahead along the arc, fRoll tilts. One distinct shot per stage (authoring grid).
+{
+  const [t0, t1, t2, t3, t4, t5, t6] = STAGES.map((_, k) => stageAt(k));
+  Object.assign(v3.Camera, {
+    // 0 low road · 1 overhead map · 2 raking light · 3 pull back · 4 dutch track · 5 orbit · 6 rise
+    fDist: [[0, 1.45], [11.8, 1.45], [t0 - 0.4, 0.55], [t0 + 1.2, 0.5], [t1, 0.95], [t1 + 1.4, 0.9], [t2, 0.75], [t2 + 1.4, 0.7], [t3, 1.4], [t3 + 1.4, 1.35], [t4, 0.8], [t4 + 1.4, 0.85], [t5, 0.9], [t5 + 1.4, 0.95], [t6, 1.2], [26.4, 1.45], [LENGTH_V3, 1.45]],
+    fPitch: [[0, -0.16], [11.8, -0.16], [t0 - 0.4, -0.55], [t0 + 1.2, -0.5], [t1, -0.02], [t1 + 1.4, 0], [t2, -0.16], [t2 + 1.4, -0.12], [t3, -0.12], [t3 + 1.4, -0.1], [t4, -0.2], [t4 + 1.4, -0.22], [t5, -0.25], [t5 + 1.4, -0.15], [t6, -0.05], [26.4, -0.16], [LENGTH_V3, -0.16]],
+    fYaw: [[0, 0.07], [11.8, 0.07], [t0 - 0.4, 0.1], [t1, 0], [t2, 0.5], [t2 + 1.4, 0.42], [t3, 0.15], [t4, -0.25], [t4 + 1.4, -0.1], [t5, -0.6], [t5 + 1.6, 0.2], [t6, 0], [26.4, 0.07], [LENGTH_V3, 0.07]],
+    fLead: [[0, 0], [11.8, 0], [t0, 0.02], [t3, 0], [t4, 0.04], [t4 + 1.4, 0.03], [t5, 0.01], [t6, 0], [LENGTH_V3, 0]],
+    fRoll: [[0, 0], [t4 - 0.3, 0], [t4, 0.08], [t4 + 1.6, 0.06], [t5, 0], [LENGTH_V3, 0]],
+    // Lens: macro 20 on the low road, 30 for the breath at «سرمایه».
+    fov: [
+      ...v3.Camera.fov.filter(([t]) => t < 12 || t > 26.5),
+      [12.8, 22], [t0 + 1.2, 20], [t1, 24], [t2, 21], [t3, 30], [t3 + 1.4, 29], [t4, 24], [t5, 23], [t6, 26], [26.4, 24],
+    ].sort((x, y) => x[0] - y[0]),
+  });
+}
 
 // The emergence: open 2.6 s at 4.2 (the card holds edge-on as a blade while light pours out of
 // it), then the face assembles over ~6 s (Card.form 4.0 → 10.0 on the final grid).

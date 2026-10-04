@@ -11,13 +11,17 @@ import {
   abs,
   attribute,
   clamp,
+  color,
   cos,
   dot,
   exp,
   floor,
+  float,
   fract,
+  fwidth,
   instancedBufferAttribute,
   length,
+  materialColor,
   max,
   mix,
   modelViewMatrix,
@@ -38,6 +42,7 @@ import {
   diffuseColor,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
+import { SDF_SPREAD } from "./sdf";
 import { makeCardU, makeNetworkU, type CardU, type NetworkU } from "./tsl";
 
 export const CARD_W = 1;
@@ -52,7 +57,7 @@ export const CARD_TEXTURES = [
   "/images/card-front.webp",
   "/images/card-back.webp",
   "/images/circuit-mask.png",
-  "/images/name-mask.png",
+  "/images/name-sdf.png",
 ];
 // Front artwork's opaque pixel box (right/bottom edges exclusive); the face UVs map onto it.
 export const FRONT_BOX = { w: 1764, h: 2868, x0: 5, x1: 1760, y0: 5, y1: 2864 };
@@ -98,10 +103,13 @@ const formNoise = (p: Node<"vec2">) => {
   );
 };
 
+// The artwork's calligraphy white (sRGB #e7e7e8, measured inside the letters).
+const LETTER = () => color(0xe7e7e8);
+
 // Brushed-metal face with: a resolve from light (uForm, both faces), a travelling light
-// sweep (both faces), and on the front the living circuit and the calligraphy written
-// by light, both read from masks traced off the artwork.
-function faceNodes(mat: THREE.MeshPhysicalNodeMaterial, U: CardU, mask: THREE.Texture, name: THREE.Texture, front: boolean) {
+// sweep (both faces), and on the front the living circuit, the calligraphy written by
+// light (from its distance field), micro brushed streaks and the path head's light pool.
+function faceNodes(mat: THREE.MeshPhysicalNodeMaterial, U: CardU, mask: THREE.Texture, nameSdf: THREE.Texture, front: boolean) {
   const fuv = uv();
   const m = texture(mask, fuv).r;
 
@@ -125,6 +133,21 @@ function faceNodes(mat: THREE.MeshPhysicalNodeMaterial, U: CardU, mask: THREE.Te
   );
 
   if (front) {
+    // Calligraphy: d in artwork px (+ outside); the edge is antialiased by its own derivative,
+    // so letters stay razor sharp at any zoom.
+    const nd = float(0.5).sub(texture(nameSdf, fuv).r).mul(2 * SDF_SPREAD);
+    const naa = max(fwidth(nd), 0.01);
+    const nm = smoothstep(naa.negate(), naa, nd).oneMinus();
+
+    // Albedo: the artwork, its letters replaced by the crisp white up close (uDetail). (A
+    // procedural brushed-metal layer was tried and cut: it cost ~15% of the card frames for a
+    // texture the artwork already carries.)
+    mat.colorNode = mix(materialColor.rgb, LETTER(), nm.mul(U.uDetail));
+
+    // The path head's soft pool of light on the metal (card-local units, so it stays round).
+    const hd = length(positionGeometry.xy.sub(U.uHeadUv.sub(0.5).mul(vec2(CARD_W, CARD_H)))).div(0.05);
+    emissive = emissive.add(vec3(0.45, 0.78, 1.0).mul(U.uHeadOn.mul(0.14).mul(exp(hd.mul(hd).negate()))));
+
     const col = floor(fuv.x.mul(110));
     const h = fract(sin(col.mul(12.9898).add(4.1)).mul(43758.5453));
     // Holding the card charges it: every trace on, brighter, faster.
@@ -137,7 +160,6 @@ function faceNodes(mat: THREE.MeshPhysicalNodeMaterial, U: CardU, mask: THREE.Te
       vec3(0.38, 0.72, 1.0).mul(m.mul(on.mul(pulse.mul(5).add(0.35)).mul(g).add(U.uCharge.mul(0.15)))),
     );
     // The name is written by light right to left (Persian reading order), then glows by uNameGlow.
-    const nm = texture(name, fuv).r;
     const xw = mix(1.08, -0.08, U.uIgnite);
     const written = smoothstep(xw.sub(0.015), xw.add(0.015), fuv.x);
     const lx = fuv.x.sub(xw).div(0.012);
@@ -268,19 +290,20 @@ function faceGeometry(shape: THREE.Shape, img: { w: number; h: number; x0: numbe
 export function Card({ rig, children }: { rig: Rig; children?: ReactNode }) {
   const gl = useThree((s) => s.gl) as unknown as THREE.WebGPURenderer;
   const scene = useThree((s) => s.scene);
-  const [front, back, mask, name] = useLoader(THREE.TextureLoader, CARD_TEXTURES);
+  const [front, back, mask, nameSdf] = useLoader(THREE.TextureLoader, CARD_TEXTURES);
 
   const parts = useMemo(() => {
     const maxAniso = gl.getMaxAnisotropy();
-    for (const t of [front, back]) {
-      t.colorSpace = THREE.SRGBColorSpace;
+    front.colorSpace = back.colorSpace = THREE.SRGBColorSpace;
+    // The calligraphy's distance field: linear data, filtered like the artwork.
+    nameSdf.colorSpace = THREE.NoColorSpace;
+    for (const t of [front, back, nameSdf]) {
       t.anisotropy = maxAniso;
       t.generateMipmaps = true;
       t.minFilter = THREE.LinearMipmapLinearFilter;
       t.needsUpdate = true;
     }
     mask.colorSpace = THREE.NoColorSpace;
-    name.colorSpace = THREE.NoColorSpace;
 
     const shape = roundedRect(CARD_W, CARD_H, RADIUS);
     const body = new THREE.ExtrudeGeometry(shape, {
@@ -310,7 +333,7 @@ export function Card({ rig, children }: { rig: Rig; children?: ReactNode }) {
         polygonOffsetFactor: -1,
         polygonOffsetUnits: -1,
       });
-      faceNodes(m, rig.uniforms, mask, name, isFront);
+      faceNodes(m, rig.uniforms, mask, nameSdf, isFront);
       return m;
     };
     const frontMat = faceMat(front, true);
@@ -323,7 +346,7 @@ export function Card({ rig, children }: { rig: Rig; children?: ReactNode }) {
     rig.edge = edgeMat;
 
     return { body, frontFace, backFace, frontMat, backMat, capMat, edgeMat, net: buildNetwork(mask, rig.network) };
-  }, [front, back, mask, name, rig, gl]);
+  }, [front, back, mask, nameSdf, rig, gl]);
 
   // Node materials only honour envMapIntensity (which Scene animates) when envMap is their own,
   // so hand them the scene's environment once it exists (WebGLRenderer did this implicitly).

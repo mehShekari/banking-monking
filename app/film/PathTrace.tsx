@@ -115,18 +115,27 @@ function ribbonMaterial(u: PathU) {
   const vS = attribute<"float">("aS", "float");
   const vX = attribute<"float">("aX", "float");
   const front = max(u.uHead, u.uAhead);
-  const across = smoothstep(0.45, 1, abs(vX)).oneMinus();
+  const ax = abs(vX);
+  const across = smoothstep(0.45, 1, ax).oneMinus();
+  // Light running in an engraved channel: a thin hot core on the centre line, dimmer walls.
+  const caa = max(fwidth(ax), 0.001);
+  const core = smoothstep(caa.negate().add(0.25), caa.add(0.25), ax).oneMinus().mul(1.6);
+  const wall = smoothstep(0.7, 0.8, ax).mul(0.4).oneMinus();
   const tip = smoothstep(u.uHead.sub(0.003), u.uHead, vS).oneMinus();
   const w = vS.sub(u.uRecap).div(0.02);
   const lit = tip.mul(
     exp(u.uHead.sub(vS).mul(-35))
-      .mul(7)
-      .add(1.2)
-      .add(exp(w.mul(w).negate()).mul(6)),
+      .mul(3.2)
+      .add(0.75)
+      .add(exp(w.mul(w).negate()).mul(6))
+      .add(core),
   );
-  const dash = smoothstep(0.4, 0.6, fract(vS.mul(260))).oneMinus();
-  const ahead = dash.mul(0.42).add(exp(front.sub(vS).mul(-300)).mul(6));
-  const b = select(vS.lessThanEqual(u.uHead), lit, ahead).mul(u.uLift.mul(0.55).oneMinus());
+  // The pre-lit road ahead: a fine dotted line down the channel's centre, not the full width,
+  // so it reads as "allocated" without shouting at macro distance.
+  const dash = smoothstep(0.35, 0.5, fract(vS.mul(420))).oneMinus();
+  const thin = smoothstep(0.22, 0.32, ax).oneMinus();
+  const ahead = dash.mul(thin).mul(0.55).add(exp(front.sub(vS).mul(-300)).mul(4).mul(thin));
+  const b = select(vS.lessThanEqual(u.uHead), lit, ahead).mul(wall).mul(u.uLift.mul(0.55).oneMinus());
   const m = new THREE.MeshBasicNodeMaterial(GLOW);
   m.maskNode = vS.lessThanEqual(front); // discard beyond the front
   m.colorNode = BLUE().mul(b);
@@ -151,7 +160,7 @@ function nodeMaterial(u: PathU) {
   const shape = band(float(0.008), float(0.012)).add(smoothstep(0.004, aa.add(0.004), r).oneMinus());
   const fl = flash(u.uHead).add(flash(u.uRecap));
   const m = new THREE.MeshBasicNodeMaterial(GLOW);
-  m.colorNode = BLUE().mul(shape.mul(mix(0.6, 3.5, lit)).add(fl.mul(5)));
+  m.colorNode = BLUE().mul(shape.mul(mix(0.45, 1.8, lit)).add(fl.mul(2.5)));
   m.opacityNode = shape.mul(mix(0.25, 1, lit)).add(fl).mul(u.uAlpha).mul(u.uLift.oneMinus());
   return m;
 }
@@ -163,7 +172,8 @@ function headMaterial(u: PathU) {
   const flicker = sin(u.uTime.mul(23)).mul(sin(u.uTime.mul(7.3))).mul(0.12).add(0.88);
   const end = smoothstep(0.995, 1, u.uHead).mul(0.6).oneMinus();
   const m = new THREE.MeshBasicNodeMaterial(GLOW);
-  m.colorNode = vec3(0.6, 0.85, 1.0).mul(6);
+  // The one hot point in the shot: near-white, not saturated blue.
+  m.colorNode = vec3(0.86, 0.93, 1.0).mul(2.6);
   m.opacityNode = glow
     .mul(flicker)
     .mul(end)
@@ -173,25 +183,37 @@ function headMaterial(u: PathU) {
   return m;
 }
 
+// Anamorphic streak through the head: a thin horizontal flare, brightest at the centre.
+function streakMaterial(u: PathU) {
+  const q = uv().sub(0.5).mul(2).abs();
+  const shape = exp(q.x.mul(-5)).mul(exp(q.y.mul(q.y).mul(-4))).mul(smoothstep(0.8, 1, q.x).oneMinus());
+  const m = new THREE.MeshBasicNodeMaterial(GLOW);
+  m.colorNode = vec3(0.86, 0.93, 1.0).mul(1.6);
+  m.opacityNode = shape.mul(u.uAlpha).mul(u.uLift.mul(0.55).oneMinus());
+  return m;
+}
+
 export function PathTrace({ u }: { u: PathU }) {
   const head = useRef<THREE.Mesh>(null);
-  const { ribbon, nodes, sprite, ribbonMat, nodeMat, headMat } = useMemo(
+  const { ribbon, nodes, sprite, streak, ribbonMat, nodeMat, headMat, streakMat } = useMemo(
     () => ({
       ribbon: buildRibbon(),
       nodes: buildNodes(),
       sprite: new THREE.PlaneGeometry(0.06, 0.06),
+      streak: new THREE.PlaneGeometry(0.12, 0.006),
       ribbonMat: ribbonMaterial(u),
       nodeMat: nodeMaterial(u),
       headMat: headMaterial(u),
+      streakMat: streakMaterial(u),
     }),
     [u],
   );
 
   useEffect(
     () => () => {
-      for (const d of [ribbon, nodes, sprite, ribbonMat, nodeMat, headMat]) d.dispose();
+      for (const d of [ribbon, nodes, sprite, streak, ribbonMat, nodeMat, headMat, streakMat]) d.dispose();
     },
-    [ribbon, nodes, sprite, ribbonMat, nodeMat, headMat],
+    [ribbon, nodes, sprite, streak, ribbonMat, nodeMat, headMat, streakMat],
   );
 
   const tmp = useMemo<[number, number]>(() => [0, 0], []);
@@ -206,7 +228,10 @@ export function PathTrace({ u }: { u: PathU }) {
     <>
       <mesh geometry={ribbon} material={ribbonMat} frustumCulled={false} renderOrder={2} />
       <mesh geometry={nodes} material={nodeMat} frustumCulled={false} renderOrder={3} />
-      <mesh ref={head} geometry={sprite} material={headMat} frustumCulled={false} renderOrder={4} />
+      <mesh ref={head} geometry={sprite} material={headMat} frustumCulled={false} renderOrder={4}>
+        {/* Child of the head: follows it and hides with it. */}
+        <mesh geometry={streak} material={streakMat} frustumCulled={false} renderOrder={5} />
+      </mesh>
     </>
   );
 }

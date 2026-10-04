@@ -97,7 +97,7 @@ export default function CardFilm() {
           .fromTo(el.querySelector("p"), { autoAlpha: 0 }, { autoAlpha: 1, duration: 0.4 }, at + 0.2);
         if (k + 1 < labels.length) {
           film
-            .to(el, { autoAlpha: 0.28, scale: 0.9, duration: 0.5, ease: "power2.out" }, stageTime(k + 1) - 0.15)
+            .to(el, { autoAlpha: 0.12, scale: 0.9, duration: 0.5, ease: "power2.out" }, stageTime(k + 1) - 0.15)
             .to(el.querySelector("p"), { autoAlpha: 0, duration: 0.3 }, stageTime(k + 1) - 0.15);
         }
         if (k + 2 < labels.length) film.to(el, { autoAlpha: 0, duration: 0.4, ease: "power2.in" }, stageTime(k + 2) - 0.15);
