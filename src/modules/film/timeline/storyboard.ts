@@ -21,7 +21,7 @@ export const LENGTH = LENGTH_V3 + EMERGE_HOLD;
 const stageAt = (k: number) => stageTime(k) - EMERGE_HOLD;
 /** Where the doors stand, and where the card waits beyond them. */
 export const DOORS_Z = [-2.2, -5, -7.8, -10.6];
-export const END_Z = -17.2;
+const END_Z = -17.2;
 
 type Key = [time: number, value: number];
 type Tracks = Record<string, Record<string, Key[]>>;
@@ -151,7 +151,7 @@ Object.assign(v3.Path, {
 
 // The emergence: open 2.6 s at 4.2 (the card holds edge-on as a blade while light pours out of
 // it), then the face assembles over ~6 s (Card.form 4.0 → 10.0 on the final grid).
-export const tracks: Tracks = insertHold(v3, 4.2, EMERGE_HOLD);
+const tracks: Tracks = insertHold(v3, 4.2, EMERGE_HOLD);
 // A slow dolly toward the blade through the pour.
 tracks.Camera.z = tracks.Camera.z.map(([t, v]): Key => (t === 4.2 + EMERGE_HOLD ? [t, 5.25] : [t, v]));
 // Light pours: a stronger edge and beam while the blade is held.

@@ -30,10 +30,11 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { CARD_H } from "./Card";
-import { bokehAlpha, bokehScale, coc, motion, streakSize, type TalentU } from "@/modules/film/scene/tsl";
+import { CARD_H } from "@/modules/film/constants/card";
+import { live } from "../live";
+import { values } from "../theatre";
+import { ADDITIVE, bokehAlpha, bokehScale, coc, makeTalentU, motion, SIGNAL, streakSize } from "../tsl";
 
-export type { TalentU } from "@/modules/film/scene/tsl";
 
 const COUNT = 12000;
 // The field held 2500 points; keep its density feel at the higher count.
@@ -62,9 +63,10 @@ const inst1 = (a: Float32Array) => instancedBufferAttribute<"float">(new THREE.I
 const inst3 = (a: Float32Array) => instancedBufferAttribute<"vec3">(new THREE.InstancedBufferAttribute(a, 3), "vec3");
 /** gl_PointCoord had y down; sprite uv has y up. */
 const pointCoord = () => vec2(uv().x, uv().y.oneMinus());
-const additive = { transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false };
+const additive = { ...ADDITIVE, fog: false };
 
-export function Talent({ u }: { u: TalentU }) {
+export function Talent() {
+  const u = useMemo(makeTalentU, []);
   const camera = useThree((s) => s.camera);
   const head = useRef<THREE.Mesh>(null);
   const you = useRef<THREE.Mesh>(null);
@@ -150,7 +152,7 @@ export function Talent({ u }: { u: TalentU }) {
       select(
         bundle.lessThan(0.5),
         vec3(0.85, 0.92, 1.0),
-        select(bundle.lessThan(1.5), vec3(0.45, 0.78, 1.0), vec3(0.32, 0.55, 1.0)),
+        select(bundle.lessThan(1.5), SIGNAL(), vec3(0.32, 0.55, 1.0)),
       ).mul(1.5),
     );
     const braidMat = new THREE.SpriteNodeMaterial(additive);
@@ -226,20 +228,30 @@ export function Talent({ u }: { u: TalentU }) {
 
   const tmp = useMemo(() => new THREE.Vector3(), []);
   useFrame((state) => {
+    const I = values("Intro");
+    u.uTalent.value = I.talent;
+    u.uChosen.value = I.chosen;
+    u.uStreams.value = I.streams;
+    u.uFieldZ.value = I.fieldZ;
+    u.uTime.value = live.t;
+    // "You are the chosen one": in the finale the pointer is a point of light on the card's plane.
+    u.uCursorOn.value = live.cursorOn;
+    u.uCursor.value.copy(live.cursor);
+
     const fov = (camera as THREE.PerspectiveCamera).fov ?? 50;
     parts.uPx.value = (2 * Math.tan((fov * Math.PI) / 360)) / (state.size.height * state.viewport.dpr);
 
     const c = u.uChosen.value;
-    const live = c > 0.001 && c < 0.999;
+    const flying = c > 0.001 && c < 0.999;
     const bright = c <= 0.3 ? easeInOut(c / 0.3) : c <= 0.8 ? 1 : 1 - (c - 0.8) / 0.2;
 
     chosenAt(c, tmp);
     parts.uChosenPos.value.copy(tmp);
-    parts.uChosenOn.value = live ? bright : 0;
+    parts.uChosenOn.value = flying ? bright : 0;
 
     const h = head.current;
     if (h) {
-      h.visible = live;
+      h.visible = flying;
       h.position.copy(tmp);
       h.quaternion.copy(camera.quaternion);
       const k = c > 0.8 ? easeInOut((c - 0.8) / 0.2) : 0;
@@ -264,7 +276,7 @@ export function Talent({ u }: { u: TalentU }) {
 
     // Trail: ghosts at earlier points of the journey, only while travelling.
     const fade = c < 0.3 ? 0 : 1 - THREE.MathUtils.clamp((c - 0.8) / 0.08, 0, 1);
-    const trailOn = live && fade > 0;
+    const trailOn = flying && fade > 0;
     if (trailSprite.current) trailSprite.current.visible = trailOn;
     if (!trailOn) return;
     for (let j = 0; j < TRAIL; j++) {

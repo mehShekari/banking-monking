@@ -25,11 +25,10 @@ import {
 } from "three/tsl";
 import { FACE_Z } from "./Card";
 import { PATH, PATH_S, STAGES, pointAt } from "@/modules/film/timeline/path";
-import type { PathU } from "@/modules/film/scene/tsl";
+import { SIGNAL, type Float } from "../tsl";
+import type { PathU } from "../tsl";
 
-export type { PathU } from "@/modules/film/scene/tsl";
 
-type F = THREE.Node<"float">;
 
 /** Additive glow over the card face (node-material options); shared with Constellation. */
 export const GLOW = {
@@ -45,7 +44,6 @@ export const GLOW = {
 const Z = FACE_Z + 0.0012;
 const HALF = 0.0034;
 const NODE_HALF = 0.05;
-const BLUE = () => vec3(0.45, 0.78, 1.0);
 
 // Ribbon: one strip with mitred joins, so corners never overlap or gap.
 function buildRibbon() {
@@ -138,7 +136,7 @@ function ribbonMaterial(u: PathU) {
   const b = select(vS.lessThanEqual(u.uHead), lit, ahead).mul(wall).mul(u.uLift.mul(0.55).oneMinus());
   const m = new THREE.MeshBasicNodeMaterial(GLOW);
   m.maskNode = vS.lessThanEqual(front); // discard beyond the front
-  m.colorNode = BLUE().mul(b);
+  m.colorNode = SIGNAL().mul(b);
   m.opacityNode = across.mul(u.uAlpha);
   return m;
 }
@@ -148,10 +146,10 @@ function nodeMaterial(u: PathU) {
   const vS = attribute<"float">("aS", "float");
   const r = length(vL);
   const aa = max(fwidth(r), 0.0005);
-  const band = (a: F, b: F) =>
+  const band = (a: Float, b: Float) =>
     smoothstep(a.sub(aa), a, r).mul(smoothstep(b, aa.add(b), r).oneMinus());
   // Expanding ring as a front (the pulse head, or the recap wave) passes this node.
-  const flash = (h: F) => {
+  const flash = (h: Float) => {
     const f = clamp(h.sub(vS).div(0.08), 0, 1);
     const fr = mix(0.012, 0.048, f);
     return smoothstep(vS.sub(0.002), vS, h).mul(f.oneMinus()).mul(band(fr.sub(0.003), fr));
@@ -160,7 +158,7 @@ function nodeMaterial(u: PathU) {
   const shape = band(float(0.008), float(0.012)).add(smoothstep(0.004, aa.add(0.004), r).oneMinus());
   const fl = flash(u.uHead).add(flash(u.uRecap));
   const m = new THREE.MeshBasicNodeMaterial(GLOW);
-  m.colorNode = BLUE().mul(shape.mul(mix(0.45, 1.8, lit)).add(fl.mul(2.5)));
+  m.colorNode = SIGNAL().mul(shape.mul(mix(0.45, 1.8, lit)).add(fl.mul(2.5)));
   m.opacityNode = shape.mul(mix(0.25, 1, lit)).add(fl).mul(u.uAlpha).mul(u.uLift.oneMinus());
   return m;
 }

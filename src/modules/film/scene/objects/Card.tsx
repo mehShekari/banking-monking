@@ -42,11 +42,11 @@ import {
   diffuseColor,
 } from "three/tsl";
 import type { Node } from "three/webgpu";
-import { SDF_SPREAD } from "@/modules/film/scene/sdf";
-import { makeCardU, makeNetworkU, type CardU, type NetworkU } from "@/modules/film/scene/tsl";
+import { CARD_H, CARD_W } from "@/modules/film/constants/card";
+import { SDF_SPREAD } from "../sdf";
+import { ADDITIVE, type CardU, makeCardU, makeNetworkU, type NetworkU, SIGNAL } from "../tsl";
+import { useCardDrive } from "./useCardDrive";
 
-export const CARD_W = 1;
-export const CARD_H = 2868 / 1764;
 const T = 0.016;
 const BEVEL = 0.0035;
 // Measured off the artwork: corner radius ≈110 px of a 1755 px wide card.
@@ -120,7 +120,7 @@ function faceNodes(mat: THREE.MeshPhysicalNodeMaterial, U: CardU, mask: THREE.Te
   const thr = U.uForm.mul(1.12).sub(0.06);
   const forming = U.uForm.lessThan(0.999);
   mat.maskNode = forming.not().or(f.lessThanEqual(thr));
-  const edgeLight = select(forming, vec3(0.45, 0.78, 1.0).mul(smoothstep(0, 0.02, thr.sub(f)).oneMinus().mul(2.2)), vec3(0));
+  const edgeLight = select(forming, SIGNAL().mul(smoothstep(0, 0.02, thr.sub(f)).oneMinus().mul(2.2)), vec3(0));
 
   const dir = vec2(cos(U.uSweepAngle), sin(U.uSweepAngle));
   const s = dot(fuv.sub(0.5), dir).add(0.5);
@@ -245,13 +245,13 @@ function buildNetwork(mask: THREE.Texture, N: NetworkU) {
     instancedBufferAttribute(new THREE.InstancedBufferAttribute(net, 3), "vec3"),
     instancedBufferAttribute(new THREE.InstancedBufferAttribute(delay, 1), "float"),
   );
-  const pointMat = new THREE.PointsNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  const pointMat = new THREE.PointsNodeMaterial(ADDITIVE);
   pointMat.sizeAttenuation = false;
   pointMat.positionNode = pv.p;
   // uSize carries the pixel ratio already; the material multiplies by it again.
   const depth = modelViewMatrix.mul(vec4(pv.p, 1)).z.negate();
   pointMat.sizeNode = N.uSize.mul(pv.m.add(0.5)).div(depth).div(screenDPR);
-  pointMat.colorNode = vec3(0.45, 0.78, 1.0).mul(1.17);
+  pointMat.colorNode = SIGNAL().mul(1.17);
   pointMat.opacityNode = smoothstep(0.5, 0, length(uv().sub(0.5))).mul(varying(pv.alpha)).mul(0.8);
   const points = new THREE.Sprite(pointMat);
   points.count = count;
@@ -267,9 +267,9 @@ function buildNetwork(mask: THREE.Texture, N: NetworkU) {
   lines.setAttribute("aNet", new THREE.BufferAttribute(pick(net, 3), 3));
   lines.setAttribute("aDelay", new THREE.BufferAttribute(pick(delay, 1), 1));
   const lv = netMotion(N, positionGeometry, attribute("aNet", "vec3"), attribute("aDelay", "float"));
-  const lineMat = new THREE.LineBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+  const lineMat = new THREE.LineBasicNodeMaterial(ADDITIVE);
   lineMat.positionNode = lv.p;
-  lineMat.colorNode = vec3(0.45, 0.78, 1.0).mul(1.4);
+  lineMat.colorNode = SIGNAL().mul(1.4);
   lineMat.opacityNode = varying(lv.alpha).mul(0.3);
   return { points, pointMat, lines, lineMat };
 }
@@ -292,6 +292,7 @@ export function Card({ rig, children }: { rig: Rig; children?: ReactNode }) {
   const gl = useThree((s) => s.gl) as unknown as THREE.WebGPURenderer;
   const scene = useThree((s) => s.scene);
   const [front, back, mask, nameSdf] = useLoader(THREE.TextureLoader, CARD_TEXTURES);
+  useCardDrive(rig);
 
   const parts = useMemo(() => {
     const maxAniso = gl.getMaxAnisotropy();
@@ -349,7 +350,7 @@ export function Card({ rig, children }: { rig: Rig; children?: ReactNode }) {
     return { body, frontFace, backFace, frontMat, backMat, capMat, edgeMat, net: buildNetwork(mask, rig.network) };
   }, [front, back, mask, nameSdf, rig, gl]);
 
-  // Node materials only honour envMapIntensity (which Scene animates) when envMap is their own,
+  // Node materials only honour envMapIntensity (which useCardDrive animates) when envMap is their own,
   // so hand them the scene's environment once it exists (WebGLRenderer did this implicitly).
   useFrame(() => {
     const env = scene.environment;

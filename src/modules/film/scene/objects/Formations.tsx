@@ -36,9 +36,12 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { CARD_H, CARD_W, FACE_Z } from "./Card";
+import { CARD_H, CARD_W } from "@/modules/film/constants/card";
+import { FACE_Z, type Rig } from "./Card";
 import { useStationsGLTF } from "./Stations";
-import { bokehAlpha, bokehScale, coc, type FormU, quality } from "@/modules/film/scene/tsl";
+import { live } from "../live";
+import { values } from "../theatre";
+import { ADDITIVE, bokehAlpha, bokehScale, coc, makeFormU, quality, SIGNAL } from "../tsl";
 
 const STATIONS = 7;
 
@@ -68,7 +71,7 @@ const SWIRL = 6; // noise swirl inside the hover radius
 const BURST = 9; // outward push at burst peak
 const ALPHA = 0.65;
 
-const GLOW = vec3(0.45, 0.78, 1.0).mul(1.3);
+const GLOW = SIGNAL().mul(1.3);
 const CHROME = vec3(0.82, 0.88, 0.95).mul(0.6);
 const METAL = vec3(0.32, 0.42, 0.6).mul(0.45);
 
@@ -158,7 +161,9 @@ function sampleStations(gltf: { scene: THREE.Object3D }, N: number) {
   return out;
 }
 
-export function Formations({ u }: { u: FormU }) {
+export function Formations({ rig }: { rig: Rig }) {
+  const u = useMemo(makeFormU, []);
+  const reduced = useMemo(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches, []);
   const gl = useThree((s) => s.gl) as unknown as THREE.WebGPURenderer;
   const gltf = useStationsGLTF();
 
@@ -260,7 +265,7 @@ export function Formations({ u }: { u: FormU }) {
       // Scattered dust sparkles: brighter with speed.
       const spark = varying(min(velB.toAttribute().length().mul(0.8), 1.2).add(1));
       const tag = varying(P.w);
-      const mat = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+      const mat = new THREE.SpriteNodeMaterial(ADDITIVE);
       mat.positionNode = wp;
       mat.scaleNode = S.mul(0.002).add(0.0035).mul(bokehScale(cc));
       mat.colorNode = select(tag.lessThan(0.5), GLOW, select(tag.lessThan(1.5), CHROME, METAL)).mul(spark);
@@ -287,6 +292,18 @@ export function Formations({ u }: { u: FormU }) {
   }, [parts, gl]);
 
   useFrame((_, delta) => {
+    // One station every ~4.6 s; held on «اثر» for reduced motion, and no scatter.
+    const F = values("Final");
+    live.formCycle = reduced ? 6 : F.form > 0.5 ? live.formCycle + delta / 4.6 : 0;
+    u.uForm.value = F.form;
+    u.uTime.value = live.t;
+    u.uCycle.value = live.formCycle;
+    if (rig.card) u.uCard.value.copy(rig.card.position);
+    u.uCursor.value.copy(live.cursor);
+    u.uCursorOn.value = reduced ? 0 : live.cursorOn;
+    u.uCharge.value = live.hands.charge;
+    u.uBurst.value = live.burst;
+    u.uPortrait.value = live.portrait ? 1 : 0;
     const form = u.uForm.value;
     const portrait = u.uPortrait.value > 0.5;
     const { N, forms } = parts;

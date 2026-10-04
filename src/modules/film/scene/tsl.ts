@@ -1,7 +1,15 @@
 // Shared TSL nodes for every film material (WebGPU renderer; TSL also compiles to WebGL2).
-// Scene writes the uniforms' `.value` every frame; materials only read them.
-import { Vector2, Vector3, type Node } from "three/webgpu";
-import { abs, clamp, length, max, mix, smoothstep, uniform, vec2 } from "three/tsl";
+// Each scene object writes its uniforms' `.value` every frame; materials only read them.
+import { AdditiveBlending, Vector2, Vector3, type Node } from "three/webgpu";
+import { abs, clamp, length, max, mix, smoothstep, uniform, vec2, vec3 } from "three/tsl";
+
+export type Float = Node<"float">;
+
+/** The film's one saturated colour: the circuit's signal blue (linear). */
+export const SIGNAL = () => vec3(0.45, 0.78, 1.0);
+
+/** Material options for light that adds up: glows, sprites, beams. */
+export const ADDITIVE = { transparent: true, depthWrite: false, blending: AdditiveBlending } as const;
 
 // The lens: sprites away from the focus distance grow into soft bokeh. Blurring only the
 // particles keeps a depth-of-field look for almost nothing; a full-screen DOF pass cost
@@ -38,8 +46,8 @@ export const bokehAlpha = (uv: Node<"vec2">, c: Node<"float">) => {
 export const streakSize = (v: Node<"float">) => v.mul(1.2).add(1);
 
 // ── Uniform contracts ─────────────────────────────────────────────────────────
-// Scene creates one of each (useMemo) and writes `.value` every frame; components build
-// their node materials from these exact uniform nodes. Same names as the GLSL era.
+// Each object creates its own set (useMemo), writes `.value` every frame, and builds its node
+// materials from these exact uniform nodes. Same names as the GLSL era.
 
 /** The path trace and the constellation (one shared object). */
 export const makePathU = () => ({

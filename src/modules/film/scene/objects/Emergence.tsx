@@ -36,15 +36,19 @@ import {
   vec3,
   vec4,
 } from "three/tsl";
-import { CARD_H, CARD_TEXTURES, CARD_W, FACE_Z, FRONT_BOX, RADIUS, readPixels, roundedRect } from "./Card";
-import { bokehAlpha, bokehScale, coc, type EmergeU, quality } from "@/modules/film/scene/tsl";
+import { CARD_H, CARD_W } from "@/modules/film/constants/card";
+import { CARD_TEXTURES, FACE_Z, FRONT_BOX, RADIUS, readPixels, roundedRect } from "./Card";
+import { live } from "../live";
+import { values } from "../theatre";
+import { ADDITIVE, bokehAlpha, bokehScale, coc, makeEmergeU, quality } from "../tsl";
 
 const SW = 220;
 const SH = 358;
 // The name's baseline on the face (uv.y), where the circuit pulses start; traces land outward from it.
 const NAME_Y = 0.575;
 
-export function Emergence({ u }: { u: EmergeU }) {
+export function Emergence() {
+  const u = useMemo(makeEmergeU, []);
   const gl = useThree((s) => s.gl) as unknown as THREE.WebGPURenderer;
   const [front, , mask] = useLoader(THREE.TextureLoader, CARD_TEXTURES);
   const sprite = useRef<THREE.Sprite>(null);
@@ -157,7 +161,7 @@ export function Emergence({ u }: { u: EmergeU }) {
     // 131k additive motes would blow out where Assemble's 12k did not; dim with the count.
     const alpha = 0.85 * Math.sqrt(12000 / N);
     const shimmer = sin(u.uTime.mul(6).add(C.w.mul(40))).mul(0.15).add(0.85);
-    const mat = new THREE.SpriteNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending });
+    const mat = new THREE.SpriteNodeMaterial(ADDITIVE);
     mat.positionNode = P.xyz;
     mat.scaleNode = C.w.mul(0.006).add(0.006).mul(bokehScale(cc));
     mat.colorNode = mix(vec3(0.6, 0.82, 1.0).mul(shimmer.mul(1.6)), C.xyz.mul(1.4), cm);
@@ -180,6 +184,8 @@ export function Emergence({ u }: { u: EmergeU }) {
   }, [parts, gl]);
 
   useFrame(() => {
+    u.uForm.value = values("Card").form;
+    u.uTime.value = live.t;
     const f = u.uForm.value;
     const on = f > 0.001 && f < 0.999;
     const sp = sprite.current;

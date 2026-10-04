@@ -2,9 +2,10 @@
 // Points are measured on the circuit mask (882×1434 px), from the bottom cluster,
 // round the name's inline-end side, up to the emblem at the top.
 
+import { CARD_H } from "@/modules/film/constants/card";
+
 const MASK_W = 882;
 const MASK_H = 1434;
-const CARD_H = 2868 / 1764;
 
 /** Polyline in mask pixels; `stage` marks a node. Orthogonal runs with 45° chamfers, like the engraving. */
 const RAW: { p: [number, number]; stage?: number }[] = [
@@ -46,8 +47,8 @@ export const STAGES = RAW.flatMap((r, i) => (r.stage === undefined ? [] : [{ pos
 export const EMERGE_HOLD = 2.6;
 
 /** Sequence timing (final film grid): the pulse rests on each node, then travels to the next. */
-export const PATH_START = 12 + EMERGE_HOLD;
-export const STAGE_GAP = 2.1;
+const PATH_START = 12 + EMERGE_HOLD;
+const STAGE_GAP = 2.1;
 export const stageTime = (k: number) => PATH_START + 0.6 + k * STAGE_GAP;
 
 /** Point on the path at arc fraction s. */

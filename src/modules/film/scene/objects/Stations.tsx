@@ -30,7 +30,7 @@ import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.j
 import { FACE_Z } from "./Card";
 import { clock } from "@/modules/film/timeline/clock";
 import { STAGES, pointAt, stageTime } from "@/modules/film/timeline/path";
-import type { PathU } from "@/modules/film/scene/tsl";
+import type { PathU } from "../tsl";
 
 let ktx2: KTX2Loader | null = null;
 

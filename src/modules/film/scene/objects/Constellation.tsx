@@ -27,9 +27,9 @@ import {
 import { FACE_Z } from "./Card";
 import { STAGES } from "@/modules/film/timeline/path";
 import { GLOW } from "./PathTrace";
-import type { PathU } from "@/modules/film/scene/tsl";
+import { SIGNAL, type Float } from "../tsl";
+import type { PathU } from "../tsl";
 
-type F = THREE.Node<"float">;
 type V3 = THREE.Node<"vec3">;
 
 const NODE_HALF = 0.05;
@@ -41,7 +41,7 @@ const onCard = (k: number) => [STAGES[k].pos[0], STAGES[k].pos[1], FACE_Z + 0.00
 const lifted = (k: number) => [STAGES[k].pos[0] * 1.6, STAGES[k].pos[1] * 1.6, FACE_Z + 0.08 + 0.05 * k];
 
 type Item = Record<string, number[]>;
-type Get = { f: (name: string) => F; v: (name: string) => V3 };
+type Get = { f: (name: string) => Float; v: (name: string) => V3 };
 
 /** Packs items into one array per field. */
 function columns(items: Item[]) {
@@ -69,7 +69,7 @@ function instanceGet(items: Item[]): Get {
       return [c.name, c.size === 1 ? instancedBufferAttribute<"float">(a, "float") : instancedBufferAttribute<"vec3">(a, "vec3")];
     }),
   );
-  return { f: (n) => cols.get(n) as F, v: (n) => cols.get(n) as V3 };
+  return { f: (n) => cols.get(n) as Float, v: (n) => cols.get(n) as V3 };
 }
 
 // Link k→k+1 at arc parameter t: both ends on-card and lifted.
@@ -86,16 +86,16 @@ const links = STAGES.slice(1).map((_, k) => k);
 
 function shared(u: PathU, get: Get) {
   // Bottom stage lifts first.
-  const lk = (k: F) => smoothstep(k.mul(0.06), k.mul(0.06).add(0.6), u.uLift);
+  const lk = (k: Float) => smoothstep(k.mul(0.06), k.mul(0.06).add(0.6), u.uLift);
   // A node's place: from the card face to its lifted spot, bobbing gently once up.
-  const node = (p0: V3, p1: V3, k: F) => {
+  const node = (p0: V3, p1: V3, k: Float) => {
     const l = lk(k);
     const bob = vec3(sin(u.uTime.mul(0.8).add(k.mul(2.3))).mul(0.004), sin(u.uTime.mul(1.1).add(k.mul(1.7))).mul(0.01), 0);
     return mix(p0, p1, l).add(bob.mul(l));
   };
   const aK = get.f("aK");
   // Point t along link k→k+1, on a slight arch toward the viewer.
-  const link = (t: F, la: F) => {
+  const link = (t: Float, la: Float) => {
     const p = mix(node(get.v("position"), get.v("aA1"), aK), node(get.v("aB0"), get.v("aB1"), aK.add(1)), t);
     return p.add(vec3(0, 0, t.mul(t.oneMinus()).mul(la).mul(0.2)));
   };
@@ -109,7 +109,7 @@ const corner = (half: number) => length(uv().sub(0.5)).mul(2 * half);
 export function Constellation({ u }: { u: PathU }) {
   const group = useRef<THREE.Group>(null);
   const parts = useMemo(() => {
-    const BLUE = vec3(0.45, 0.78, 1.0);
+    const BLUE = SIGNAL();
 
     // Nodes: core + ring + halo; the on-card node fades by (1 - uLift) as this one takes its light.
     const ng = instanceGet(STAGES.map((_, k) => ({ position: onCard(k), aA1: lifted(k), aK: [k] })));

@@ -7,11 +7,13 @@ import { useFrame, useLoader } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three/webgpu";
 import { abs, fract, max, positionView, pow, smoothstep, texture, uniform, uv, vec3 } from "three/tsl";
-import { CARD_H } from "./Card";
+import { CARD_H } from "@/modules/film/constants/card";
 import { DOORS_Z } from "@/modules/film/timeline/storyboard";
-import type { DoorsU } from "@/modules/film/scene/tsl";
+import { live } from "../live";
+import { values } from "../theatre";
+import { type DoorsU, makeDoorsU, SIGNAL } from "../tsl";
 
-export const DOOR_W = 2.4;
+const DOOR_W = 2.4;
 export const DOOR_H = DOOR_W * CARD_H;
 const R = 0.063 * DOOR_W;
 const LINE = 0.012;
@@ -63,7 +65,7 @@ const depthFade = () => {
 function panelMaterial(mask: THREE.Texture, u: DoorsU, uOpen: THREE.UniformNode<"float", number>) {
   const vUv = uv();
   const m = texture(mask, vUv).r;
-  const blue = vec3(0.45, 0.78, 1.0);
+  const blue = SIGNAL();
   const pulse = pow(fract(abs(vUv.y.sub(0.575)).mul(1.6).sub(u.uTime.mul(0.28)).add(vUv.x.mul(0.15))), 14);
   const inner = smoothstep(0, 0.02, abs(vUv.x.sub(0.5))).oneMinus();
   const mat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, side: THREE.DoubleSide, fog: false });
@@ -89,7 +91,8 @@ function outlineMaterial(u: DoorsU) {
   return mat;
 }
 
-export function Doors({ u }: { u: DoorsU }) {
+export function Doors() {
+  const u = useMemo(makeDoorsU, []);
   const mask = useLoader(THREE.TextureLoader, "/images/circuit-mask.png");
   const hinges = useRef<(THREE.Group | null)[]>([]);
 
@@ -113,6 +116,9 @@ export function Doors({ u }: { u: DoorsU }) {
   );
 
   useFrame(() => {
+    u.uAlpha.value = values("Doors").alpha;
+    u.uCardZ.value = values("Card").z;
+    u.uTime.value = live.t;
     const visible = u.uAlpha.value > 0.001;
     DOORS_Z.forEach((z, k) => {
       // 0 while the card is 1.2 in front of the door, 1 once it is 0.6 past it.
