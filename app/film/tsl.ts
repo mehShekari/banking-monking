@@ -1,6 +1,6 @@
 // Shared TSL nodes for every film material (WebGPU renderer; TSL also compiles to WebGL2).
 // Scene writes the uniforms' `.value` every frame; materials only read them.
-import { Vector3, type Node } from "three/webgpu";
+import { Vector2, Vector3, type Node } from "three/webgpu";
 import { abs, clamp, length, max, mix, smoothstep, uniform, vec2 } from "three/tsl";
 
 // The lens: sprites away from the focus distance grow into soft bokeh. Blurring only the
@@ -82,6 +82,12 @@ export const makeCardU = () => ({
   uForm: uniform(0),
   uIgnite: uniform(0),
   uNameGlow: uniform(0),
+  /** 0…1: how close the macro camera is (Camera.follow). Gates micro detail that only reads up close. */
+  uDetail: uniform(0),
+  /** The path head on the card face, in face uv (0..1): a soft pool of light on the metal. */
+  uHeadUv: uniform(new Vector2(0.5, 0.5)),
+  /** 0…1: strength of that light pool (the path's alpha). */
+  uHeadOn: uniform(0),
 });
 export const makeNetworkU = () => ({ uMix: uniform(0), uTime: uniform(0), uSize: uniform(28) });
 export type CardU = ReturnType<typeof makeCardU>;
